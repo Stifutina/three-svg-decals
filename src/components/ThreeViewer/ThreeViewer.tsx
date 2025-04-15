@@ -1,0 +1,316 @@
+import * as THREE from 'three';
+import { useEffect, useCallback, useState, useRef } from 'react';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'; // Ensure GLTFLoader is included
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'; // Import OrbitControls
+import { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'; // Import GLTF type
+import GUI from 'lil-gui'
+// import { Decals } from '../../utils/decals';
+import { RGBELoader } from 'three/examples/jsm/Addons.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
+import { SVGDecals } from '../../utils/SVGDecals';
+import { SVGTexture } from '../../utils/SVGTexture';
+
+interface ThreeViewerProps {
+    modelUrl: string;
+    environmentUrl?: string;
+    textureColorUrl?: string;
+    textureNormalUrl?: string;
+    textureAmbientOcclusionUrl?: string;
+}
+
+
+const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
+    const [modelLoaded, setModelLoaded] = useState(false);
+    const [sceneReady, setSceneReady] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const loadingManager = useRef(new THREE.LoadingManager());
+    const textureLoader = useRef(new THREE.TextureLoader(loadingManager.current));
+    const scene = useRef(new THREE.Scene());
+    const model = useRef<THREE.Object3D | null>(null);
+    const camera = useRef<THREE.PerspectiveCamera | null>(null);
+    const renderer = useRef(new THREE.WebGLRenderer({ antialias: true }));
+    const gui = useRef<GUI|null>(null);
+    const controls = useRef<OrbitControls | null>(null);
+    const lights = useRef<THREE.Object3D[]>([]);
+    const mountRef = useRef<HTMLDivElement | null>(null);
+    const sizes = useRef({ width: 0, height: 0 });
+    const aspectRatio = useRef(1);
+    const animationFrame = useRef<number>(0);
+    const allowAnimation = useRef<boolean>(false);
+    const allowAnimationTimeout = useRef<number>(0);
+    const decals = useRef<SVGDecals | null>(null);
+    const svgTextureInstance = useRef<SVGTexture | null>(null);
+
+    const loadModel = useCallback(() => {
+        const gltfLoader = new GLTFLoader();
+        const dracoLoader = new DRACOLoader();
+
+        dracoLoader.setDecoderPath('/draco/');
+        gltfLoader.setDRACOLoader(dracoLoader);
+
+        gltfLoader.load(
+            props.modelUrl,
+            (gltf: GLTF) => {
+                model.current = gltf.scene;
+                scene.current.add(model.current);
+                
+                setModelLoaded(true);
+            },
+            undefined,
+            (error: unknown) => {
+                if (error instanceof Error) {
+                    console.error('An error occurred while loading the model:', error);
+                    setError(error.message);
+                } else {
+                    console.error('An unknown error occurred while loading the model:', error);
+                    setError('Unknown error occurred');
+                }
+            }
+        );
+    }, [props.modelUrl]);
+
+    const setupLights = useCallback(() => {
+        if (props.environmentUrl) {
+            const rgbeLoader = new RGBELoader();
+
+            rgbeLoader.load(props.environmentUrl, (envMap) => {
+                envMap.mapping = THREE.EquirectangularRefractionMapping;
+                scene.current.environment = envMap;
+            });
+        } else {
+            const ambientLight = new THREE.AmbientLight(new THREE.Color(0.13333333, 0.13333333, 0.13333333), 0.6);
+             
+            scene.current.add(ambientLight);
+            lights.current.push(ambientLight);
+        }
+    }, []);
+
+    const updateSizes = useCallback(() => {
+        sizes.current.width = window.innerWidth;
+        sizes.current.height = window.innerHeight;
+        aspectRatio.current = sizes.current.width / sizes.current.height;
+
+        if (camera.current) {
+            camera.current.aspect = aspectRatio.current;
+            camera.current.updateProjectionMatrix();
+        }
+        renderer.current.setSize(sizes.current.width, sizes.current.height);
+        renderer.current.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+        updateRender();
+    }, []);
+
+
+    const initializeMaterials = useCallback(async () => {
+        const baseMaterial = new THREE.MeshStandardMaterial({
+            color: 0xffffff,
+            name: 'baseMaterial',
+            visible: true,
+        });
+        const SCALING = 20;
+
+        baseMaterial.flatShading = false;
+        baseMaterial.lightMap = scene.current.environment;
+        baseMaterial.lightMapIntensity = 0.2;
+
+        await new Promise<void>(resolve => {
+            if (props.textureColorUrl) {
+                if (props.textureColorUrl.endsWith('.svg')) {
+                    fetch(props.textureColorUrl)
+                        .then(response => response.text())
+                        .then(svgContent => {
+                            svgTextureInstance.current = new SVGTexture(svgContent, baseMaterial);
+
+                            if (baseMaterial.map) {
+                                baseMaterial.map.flipY = false;
+                            }
+
+                            resolve();
+                        })
+                        .catch(error => {
+                            console.error('Error loading SVG texture:', error);
+                            resolve();
+                        });
+                } else {
+                    baseMaterial.map = textureLoader.current.load(props.textureColorUrl, () => {
+                        if (baseMaterial.map) {
+                            baseMaterial.map.needsUpdate = true;
+                        }
+                        resolve();
+                    });
+                }
+            } else {
+                resolve();
+            }
+        });
+
+        if (props.textureNormalUrl) {
+            baseMaterial.normalMapType = THREE.TangentSpaceNormalMap;
+            baseMaterial.normalMap = textureLoader.current.load(props.textureNormalUrl);
+            baseMaterial.normalMap.wrapS = THREE.RepeatWrapping;
+            baseMaterial.normalMap.wrapT = THREE.RepeatWrapping;
+            baseMaterial.normalMap.repeat.set(SCALING, SCALING);
+            baseMaterial.normalScale.set(0.5, 0.5);
+        }
+        if (props.textureAmbientOcclusionUrl) {
+            baseMaterial.aoMap = textureLoader.current.load(props.textureAmbientOcclusionUrl);
+            baseMaterial.aoMap.wrapS = THREE.RepeatWrapping;
+            baseMaterial.aoMap.wrapT = THREE.RepeatWrapping;
+            baseMaterial.aoMap.repeat.set(SCALING, SCALING);
+        }
+
+        model.current?.traverse((child) => {
+            if (child instanceof THREE.Mesh) {
+                child.material = baseMaterial;
+            }
+        });
+
+        updateRender();
+    }, [props]);
+
+    const setupGUI = useCallback(() => {
+        if (controls.current?.target && !gui.current) {
+            gui.current = new GUI({ width: 300 });
+            gui.current.add(controls.current.target, 'y', -3, 3, 0.01).name('Controls Target Y').onChange(() => controls.current?.update());
+            gui.current.add(controls.current.target, 'z', -3, 3, 0.01).name('Controls Target Z').onChange(() => controls.current?.update());
+            
+            gui.current.add({
+                addDecal: () => {
+                    decals.current?.putDecal();
+
+                    updateRender();
+                }
+            }, 'addDecal').name('Add Decal');
+
+            gui.current.add({
+                downloadDecalTexture: () => {
+                    decals.current?.downloadDecalTexture();
+                }
+            }, 'downloadDecalTexture').name('Download Decal Texture');
+
+            gui.current.add({
+                downloadBaseTexture: () => {
+                    svgTextureInstance.current?.downloadSVG();
+                }
+            }, 'downloadBaseTexture').name('Download Base Texture');
+
+            gui.current.add({
+                downloadMergedTexture: () => {
+                    const baseSVGTexture = svgTextureInstance.current?.getSVGElement();
+                    const decalSVGTexture = decals.current?.getSVGElement();
+                    if (baseSVGTexture && decalSVGTexture) {
+                        svgTextureInstance.current?.mergeAndDownloadSVG([baseSVGTexture, decalSVGTexture]);
+                    }
+                }
+            }, 'downloadMergedTexture').name('Download Merged Texture');
+        }
+    }, []);
+
+    const initScene = useCallback(() => {
+        if (mountRef.current && !sceneReady) {
+            window.addEventListener('resize', updateSizes);
+
+            loadModel();
+            setupLights();
+            updateSizes();
+
+            renderer.current.toneMapping = THREE.ReinhardToneMapping;
+            renderer.current.toneMappingExposure = 1.75;
+            renderer.current.setClearColor('#211d20');
+            renderer.current.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.current.shadowMap.enabled = true;
+
+            camera.current = new THREE.PerspectiveCamera(75, aspectRatio.current, 0.1, 200);
+            controls.current = new OrbitControls(camera.current, renderer.current.domElement);
+            mountRef.current.appendChild(renderer.current.domElement);
+            controls.current.enableDamping = true;
+            camera.current.position.z = 50;
+            camera.current.position.y = 1.4;
+            controls.current.target.set(0, 1.3, 0);
+
+            controls.current?.update();
+
+            setSceneReady(true);
+        }
+    }, [sceneReady]);
+
+    const updateRender = useCallback(() => {
+        allowAnimation.current = true;
+        window.clearTimeout(allowAnimationTimeout.current);
+        allowAnimationTimeout.current = window.setTimeout(() => {
+            allowAnimation.current = false;
+        }, 1000);
+    }, []);
+
+    useEffect(() => {
+        const initDecals = async () => {
+            if (modelLoaded && model.current && controls.current) {
+                controls.current?.addEventListener('change', updateRender);
+    
+                await initializeMaterials();
+    
+                if (props.textureColorUrl?.includes('.svg') && camera.current) {
+                    decals.current = new SVGDecals(scene.current, model.current, camera.current, controls.current);
+
+                    decals.current.on('update', () => {
+                        updateRender();
+                    });
+                }
+                
+                setupGUI();
+                updateRender();
+            }
+        }
+
+        initDecals();
+    }, [modelLoaded]);
+
+    const render = useCallback(() => {
+        if (allowAnimation.current) {
+            if (camera.current) {
+                renderer.current.render(scene.current, camera.current);
+            }
+            controls.current?.update();
+        }
+        animationFrame.current = window.requestAnimationFrame(render);
+    }, []);
+
+
+    useEffect(() => {
+        if (mountRef.current) {
+            initScene();
+            render();
+        }
+
+        return () => {
+            renderer.current.dispose();
+            controls.current?.dispose();
+            scene.current.traverse((child) => {
+                if (child instanceof THREE.Mesh) {
+                    child.geometry.dispose();
+
+                    for (const key in child.material) {
+                        const value = child.material[key];
+
+                        if (value && typeof value.dispose === 'function') {
+                            value.dispose();
+                        }
+                    }
+                }
+            });
+            lights.current = [];
+            window.cancelAnimationFrame(animationFrame.current);
+            window.removeEventListener('resize', updateSizes);
+        };
+    }, []);
+
+    return (
+        <div>
+            <div ref={mountRef} />
+            {!modelLoaded && <p>Loading model...</p>}
+            {error && <p>Error: {error}</p>}
+        </div>
+    );
+};
+
+export default ThreeViewer;
