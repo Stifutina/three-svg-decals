@@ -165,6 +165,10 @@ export class SVGDecals extends EventEmitter {
                     this.emit('update', [{ event, updatedSVGContent, dragging: this.dragging }]);
 
                     console.timeLog('dragging', 'this.emit update');
+                } else {
+                    requestAnimationFrame(() => {
+                        this.updating = false;
+                    });
                 }
             }
         });
@@ -417,22 +421,25 @@ export class SVGDecals extends EventEmitter {
         const svgWidth = parseFloat(this.svgElement.getAttribute('width') || '100');
         const svgHeight = parseFloat(this.svgElement.getAttribute('height') || '100');
         const intersects = this.getMouseIntersections(event);
-        const intersected = intersects[0];
-        const uv = this.getIntersectionUVCoordinates(intersected);
-        
-        if (!uv) return null;
 
-        const centerX = (contentBBox.x + (contentBBox.width * 0.5)) / svgWidth;
-        const centerY = (contentBBox.y + (contentBBox.height * 0.5)) / svgHeight;
-        const angleRadians = Math.atan2(uv.y - centerY, uv.x - centerX);
-        let deg = ((angleRadians * (180 / Math.PI) + 360)) % 360;
-
-        deg -= this.startRotateAngle; // offset
-        deg += this.savedRotateAngle; // previous value
-
-        this.updateDecal(activeDecal.getAttribute('name') || '', {
-            rotate: deg
-        });
+        if (intersects.length > 0) {
+            const intersected = intersects[0];
+            const uv = this.getIntersectionUVCoordinates(intersected);
+            
+            if (!uv) return null;
+    
+            const centerX = (contentBBox.x + (contentBBox.width * 0.5)) / svgWidth;
+            const centerY = (contentBBox.y + (contentBBox.height * 0.5)) / svgHeight;
+            const angleRadians = Math.atan2(uv.y - centerY, uv.x - centerX);
+            let deg = ((angleRadians * (180 / Math.PI) + 360)) % 360;
+    
+            deg -= this.startRotateAngle; // offset
+            deg += this.savedRotateAngle; // previous value
+    
+            this.updateDecal(activeDecal.getAttribute('name') || '', {
+                rotate: deg
+            });
+        }
 
         const updatedSVGContent = new XMLSerializer().serializeToString(this.svgElement);
 
