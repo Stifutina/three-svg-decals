@@ -205,8 +205,8 @@ export class SVGDecals extends EventEmitter {
     }
 
 
-    private getIntersectionUVCoordinates(intersected: THREE.Intersection): THREE.Vector2 | null {
-        if (intersected.uv) {
+    private getIntersectionUVCoordinates(intersected: THREE.Intersection | undefined): THREE.Vector2 | null {
+        if (intersected?.uv) {
             return intersected.uv.clone();
         }
         return null;
