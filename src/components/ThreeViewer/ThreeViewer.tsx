@@ -77,12 +77,12 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
                 envMap.mapping = THREE.EquirectangularRefractionMapping;
                 scene.current.environment = envMap;
             });
-        } else {
-            const ambientLight = new THREE.AmbientLight(new THREE.Color(0.13333333, 0.13333333, 0.13333333), 0.6);
-             
-            scene.current.add(ambientLight);
-            lights.current.push(ambientLight);
         }
+
+        const ambientLight = new THREE.AmbientLight(new THREE.Color(1, 1, 1), 1);
+             
+        scene.current.add(ambientLight);
+        lights.current.push(ambientLight);
     }, []);
 
     const updateSizes = useCallback(() => {
@@ -97,6 +97,9 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
         renderer.current.setSize(sizes.current.width, sizes.current.height);
         renderer.current.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
+        renderer.current.outputColorSpace = THREE.LinearSRGBColorSpace;
+        renderer.current.toneMapping = THREE.NoToneMapping;
+        renderer.current.toneMappingExposure = 2;
         updateRender();
     }, []);
 
@@ -109,9 +112,9 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
         });
         const SCALING = 20;
 
-        baseMaterial.flatShading = false;
-        baseMaterial.lightMap = scene.current.environment;
-        baseMaterial.lightMapIntensity = 0.2;
+        // baseMaterial.flatShading = true;
+        // baseMaterial.lightMap = scene.current.environment;
+        // baseMaterial.lightMapIntensity = 0.8;
 
         await new Promise<void>(resolve => {
             if (props.textureColorUrl) {
@@ -174,6 +177,19 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
             gui.current.add(controls.current.target, 'y', -3, 3, 0.01).name('Controls Target Y').onChange(() => controls.current?.update());
             gui.current.add(controls.current.target, 'z', -3, 3, 0.01).name('Controls Target Z').onChange(() => controls.current?.update());
             
+
+            gui.current.add(renderer.current, 'toneMapping', {
+                No: THREE.NoToneMapping,
+                Linear: THREE.LinearToneMapping,
+                Reinhard: THREE.ReinhardToneMapping,
+                Cineon: THREE.CineonToneMapping,
+                ACESFilmic: THREE.ACESFilmicToneMapping
+            });
+            gui.current.add(renderer.current, 'outputColorSpace', {
+                Linear: THREE.LinearSRGBColorSpace,
+                sRGB: THREE.SRGBColorSpace,
+            });
+
             gui.current.add({
                 addDecal: () => {
                     decals.current?.putDecal();
@@ -214,8 +230,6 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
             setupLights();
             updateSizes();
 
-            renderer.current.toneMapping = THREE.ReinhardToneMapping;
-            renderer.current.toneMappingExposure = 1.75;
             renderer.current.setClearColor('#211d20');
             renderer.current.shadowMap.type = THREE.PCFSoftShadowMap;
             renderer.current.shadowMap.enabled = true;

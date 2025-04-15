@@ -534,6 +534,23 @@ export class SVGDecals extends EventEmitter {
         }
     };
 
+    // private createControlButtons(): SVGGraphicsElement | null {
+    //     const group = document.createElementNS(svgNS, 'g');
+    //     const rotateIcon = document.createElementNS(svgNS, 'path');
+
+    //     rotateIcon.setAttribute('fill', 'none');
+    //     rotateIcon.setAttribute('stroke', 'currentColor');
+    //     rotateIcon.setAttribute('stroke-linecap', 'round');
+    //     rotateIcon.setAttribute('stroke-linejoin', 'round');
+    //     rotateIcon.setAttribute('stroke-width', '2');
+    //     rotateIcon.setAttribute('d', 'M19.95 11a8 8 0 1 0-.5 4m.5 5v-5h-5');
+    //     rotateIcon.setAttribute('name', 'control-rotate-icon');
+
+    //     group.appendChild(rotateIcon);
+
+    //     return group;
+    // }
+
     private createDecalContainer(decalName: string): SVGGraphicsElement | null {
         if (!this.svgElement) {
             console.warn('SVG element is not available.');
@@ -543,6 +560,7 @@ export class SVGDecals extends EventEmitter {
         const group = document.createElementNS(svgNS, 'g');
         const contentGroup = document.createElementNS(svgNS, 'g');
         const controlsGroup = document.createElementNS(svgNS, 'g');
+
         const rotateIcon = document.createElementNS(svgNS, 'path');
 
         rotateIcon.setAttribute('fill', 'none');
