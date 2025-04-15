@@ -497,11 +497,7 @@ export class SVGDecals extends EventEmitter {
                 boundingBox.max.y + distance,
                 Math.random(),
             ),
-            THREE.MathUtils.lerp(
-                boundingBox.min.z - distance,
-                boundingBox.max.z + distance,
-                Math.random(),
-            )
+            this.camera.position.z,
         );
 
         const rayDirection = new THREE.Vector3();
