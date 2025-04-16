@@ -264,7 +264,7 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
                 await initializeMaterials();
     
                 if (props.textureColorUrl?.includes('.svg') && camera.current) {
-                    decals.current = new SVGDecals(scene.current, model.current, camera.current, controls.current);
+                    decals.current = new SVGDecals(scene.current, model.current, camera.current, controls.current, renderer.current);
 
                     decals.current.on('update', () => {
                         updateRender();

@@ -21,15 +21,21 @@ export class SVGDecals extends EventEmitter {
     private modelGroup: THREE.Group = new THREE.Group();
     private raycaster = new THREE.Raycaster();
     private camera: THREE.PerspectiveCamera;
+    private renderer: THREE.WebGLRenderer;
     private controls: OrbitControls;
     private svgElement: SVGSVGElement | null = null;
     private maxAttemps = 10;
     private dragging = false;
     private rotating = false;
+    private scaling = false;
     private updating = false;
     private startDragCoordinates: THREE.Vector2 | null = null;
     private savedRotateAngle: number = 0;
     private startRotateAngle: number = 0;
+    private savedScale: number = 0;
+    private distanceFromCenterOnStart: number = 0;
+    private startScalePos: {x: number, y: number} = {x: 0, y: 0};
+    private startScaleCenter: {x: number, y: number} = {x: 0, y: 0};
     private decalSVGInitial = `
             <svg xmlns="${svgNS}" width="2048" height="2048" fill="none" viewBox="0 0 2048 2048" version="1.1" xml:space="preserve">
                 <style>
@@ -48,11 +54,12 @@ export class SVGDecals extends EventEmitter {
     private decalMaterial: THREE.MeshStandardMaterial;
     private decalSVGTexture: SVGTexture | null = null;
 
-    constructor(scene: THREE.Scene, model: THREE.Object3D, camera: THREE.PerspectiveCamera, controls: OrbitControls) {
+    constructor(scene: THREE.Scene, model: THREE.Object3D, camera: THREE.PerspectiveCamera, controls: OrbitControls, renderer: THREE.WebGLRenderer) {
         super();
         this.scene = scene;
         this.mainModel = model;
         this.camera = camera;
+        this.renderer = renderer;
         this.controls = controls;
         this.raycaster.firstHitOnly = true;
 
@@ -62,7 +69,7 @@ export class SVGDecals extends EventEmitter {
             name: 'decalMaterial',
             transparent: true,
             opacity: 1,
-            visible: true
+            visible: true,
         });
         this.decalSVGTexture = new SVGTexture(this.decalSVGInitial, this.decalMaterial);
 
@@ -99,8 +106,6 @@ export class SVGDecals extends EventEmitter {
 
         this.scene.remove(this.mainModel);
 
-
-        console.log('this.scene', this.scene);
         console.timeEnd('computeBoundsTree');
 
         this.svgElement = this.decalSVGTexture?.getSVGElement() || null;
@@ -111,20 +116,25 @@ export class SVGDecals extends EventEmitter {
         window.addEventListener('mousedown', (event: MouseEvent) => {
             if (!this.svgElement) return;
 
+            this.startScalePos = {x: event.clientX, y: event.clientY};
+
             const intersects = this.getMouseIntersections(event);
             const decalIntersected = this.selectDecalByClickedPosition(intersects);
             const controlIntersected = this.useControlByClickedPosition(intersects);
             const contentIntersected = this.useContentByClickedPosition(intersects);
             const updatedSVGContent = new XMLSerializer().serializeToString(this.svgElement);
 
+
+            console.log('this.startScalePos', this.startScalePos)
             console.log('controlIntersected', controlIntersected);
             console.log('contentIntersected', contentIntersected);
 
             this.dragging = decalIntersected && contentIntersected !== null;
             this.rotating = decalIntersected && controlIntersected !== null && controlIntersected.getAttribute('name') === 'control-rotate-icon';
-            this.controls.enablePan = !this.dragging && !this.rotating;
-            this.controls.enableZoom = !this.dragging && !this.rotating;
-            this.controls.enableRotate = !this.dragging && !this.rotating;
+            this.scaling = decalIntersected && controlIntersected !== null && controlIntersected.getAttribute('name') === 'control-scale-icon';
+            this.controls.enablePan = !this.dragging && !this.rotating && !this.scaling;
+            this.controls.enableZoom = !this.dragging && !this.rotating && !this.scaling;
+            this.controls.enableRotate = !this.dragging && !this.rotating && !this.scaling;
 
             this.decalSVGTexture?.updateSVGTexture();
 
@@ -134,11 +144,11 @@ export class SVGDecals extends EventEmitter {
         window.addEventListener('mousemove', (event: MouseEvent) => {
             if (this.updating) return;
 
-            this.controls.enablePan = !this.dragging && !this.rotating;
-            this.controls.enableZoom = !this.dragging && !this.rotating;
-            this.controls.enableRotate = !this.dragging && !this.rotating;
+            this.controls.enablePan = !this.dragging && !this.rotating && !this.scaling;
+            this.controls.enableZoom = !this.dragging && !this.rotating && !this.scaling;
+            this.controls.enableRotate = !this.dragging && !this.rotating && !this.scaling;
 
-            if (this.dragging || this.rotating) {
+            if (this.dragging || this.rotating || this.scaling) {
                 this.updating = true;
 
                 console.time('dragging');
@@ -149,6 +159,8 @@ export class SVGDecals extends EventEmitter {
                     updatedSVGContent = this.handleDragDecal(event);
                 } else if (this.rotating) {
                     updatedSVGContent = this.handleRotateDecal(event);
+                } else if (this.scaling) {
+                    updatedSVGContent = this.handleScaleDecal(event);
                 }
                 
 
@@ -175,9 +187,10 @@ export class SVGDecals extends EventEmitter {
         window.addEventListener('mouseup', (event) => {
             this.dragging = false;
             this.rotating = false;
-            this.controls.enablePan = !this.dragging && !this.rotating;
-            this.controls.enableZoom = !this.dragging && !this.rotating;
-            this.controls.enableRotate = !this.dragging && !this.rotating;
+            this.scaling = false;
+            this.controls.enablePan = !this.dragging && !this.rotating && !this.scaling;
+            this.controls.enableZoom = !this.dragging && !this.rotating && !this.scaling;
+            this.controls.enableRotate = !this.dragging && !this.rotating && !this.scaling;
 
             this.decalSVGTexture?.updateSVGTexture();
 
@@ -208,12 +221,124 @@ export class SVGDecals extends EventEmitter {
         return intersects;
     }
 
+    private uvToBarycentric(p: THREE.Vector2, a: THREE.Vector2, b: THREE.Vector2, c: THREE.Vector2): THREE.Vector3 | null {
+        const v0 = b.clone().sub(a);
+        const v1 = c.clone().sub(a);
+        const v2 = p.clone().sub(a);
+      
+        const d00 = v0.dot(v0);
+        const d01 = v0.dot(v1);
+        const d11 = v1.dot(v1);
+        const d20 = v2.dot(v0);
+        const d21 = v2.dot(v1);
+        const denom = d00 * d11 - d01 * d01;
+      
+        if (denom === 0) return null;
+      
+        const v = (d11 * d20 - d01 * d21) / denom;
+        const w = (d00 * d21 - d01 * d20) / denom;
+        const u = 1 - v - w;
+      
+        return new THREE.Vector3(u, v, w);
+    }
+
+    private getMeshPointByUV(object: THREE.Object3D, uv: THREE.Vector2): THREE.Vector3 {
+        const position = new THREE.Vector3();
+
+        if (object instanceof THREE.Mesh && object.geometry.attributes.uv) {
+            const posAttr = object.geometry.attributes.position;
+            const uvAttr = object.geometry.attributes.uv;
+            const indexAttr = object.geometry.index;
+
+            if (!posAttr || !uvAttr) return position;
+
+            const triangle = [0, 0, 0]; // Indices
+            const uvA = new THREE.Vector2(), uvB = new THREE.Vector2(), uvC = new THREE.Vector2();
+            const posA = new THREE.Vector3(), posB = new THREE.Vector3(), posC = new THREE.Vector3();
+
+            const triangleCount = indexAttr ? indexAttr.count / 3 : posAttr.count / 3;
+
+            console.time('getMeshPointByMeshUV');
+
+            for (let i = 0; i < triangleCount; i++) {
+                // Get triangle vertex indices
+                for (let j = 0; j < 3; j++) {
+                triangle[j] = indexAttr ? indexAttr.getX(i * 3 + j) : i * 3 + j;
+                }
+
+                // Get triangle UVs
+                uvA.fromBufferAttribute(uvAttr, triangle[0]);
+                uvB.fromBufferAttribute(uvAttr, triangle[1]);
+                uvC.fromBufferAttribute(uvAttr, triangle[2]);
+
+                // Check if UV is inside this triangle
+                const barycoord = this.uvToBarycentric(uv, uvA, uvB, uvC);
+                if (barycoord && barycoord.x >= 0 && barycoord.y >= 0 && barycoord.z >= 0) {
+                    console.timeEnd('getMeshPointByMeshUV');
+
+                    // Interpolate position using barycentric coords
+                    posA.fromBufferAttribute(posAttr, triangle[0]);
+                    posB.fromBufferAttribute(posAttr, triangle[1]);
+                    posC.fromBufferAttribute(posAttr, triangle[2]);
+
+                    return object.localToWorld(new THREE.Vector3()
+                        .addScaledVector(posA, barycoord.x)
+                        .addScaledVector(posB, barycoord.y)
+                        .addScaledVector(posC, barycoord.z));
+                }
+            }
+
+            console.timeEnd('getMeshPointByMeshUV');
+
+            return position; // UV not found in any triangle
+
+        }
+
+        return position;
+    }
+
+    private reverseRaycast(scenePoint: THREE.Vector3): THREE.Vector2 {
+        const canvas = this.renderer.domElement;
+
+        const point = scenePoint.clone();
+        
+        point.project( this.camera );
+
+        const screenPoint = new THREE.Vector2();
+        
+        screenPoint.x = Math.round(( 0.5 + point.x / 2 ) * ( canvas.width / this.renderer.getPixelRatio() ));
+        screenPoint.y = Math.round(( 0.5 - point.y / 2 ) * ( canvas.height / this.renderer.getPixelRatio() ));
+
+        return screenPoint;
+    }
+
 
     private getIntersectionUVCoordinates(intersected: THREE.Intersection | undefined): THREE.Vector2 | null {
         if (intersected?.uv) {
             return intersected.uv.clone();
         }
         return null;
+    }
+    
+
+    private getElementBBox(element: SVGGraphicsElement, decal: SVGElement, scaled: boolean): DOMRect | null {
+        if (!(element instanceof SVGGraphicsElement)) return null;
+
+        const bbox = element?.getBBox({stroke: true});
+
+        if (!scaled) return bbox;
+
+        const scaleFactor = parseFloat(decal.getAttribute('scale') || '1');
+        const initialWidth = bbox.width;
+        const initialHeight = bbox.height;
+
+        bbox.width *= scaleFactor;
+        bbox.height *= scaleFactor;
+
+        bbox.x -= (bbox.width - initialWidth) / 2;
+        bbox.y -= (bbox.height - initialHeight) / 2;
+
+        return bbox;
     }
 
 
@@ -254,6 +379,7 @@ export class SVGDecals extends EventEmitter {
                 const yPos = uv.y * svgHeight;
                 const bbox = button.getBBox();
                 const transform = activeDecalControlElement?.getAttribute('transform');
+                const buttonTransform = button.getAttribute('transform');
                 let translateX = 0, translateY = 0;
 
                 if (transform) {
@@ -261,6 +387,13 @@ export class SVGDecals extends EventEmitter {
                     if (match) {
                         translateX = parseFloat(match[1]) || 0;
                         translateY = parseFloat(match[2]) || 0;
+                    }
+                }
+                if (buttonTransform) {
+                    const match = /translate\(([^,]+),\s*([^)]+)\)/.exec(buttonTransform);
+                    if (match) {
+                        translateX += parseFloat(match[1]) || 0;
+                        translateY += parseFloat(match[2]) || 0;
                     }
                 }
 
@@ -281,14 +414,18 @@ export class SVGDecals extends EventEmitter {
     private getContentElementByUV(uv: THREE.Vector2): Element | null {
         if (!this.svgElement) return null;
 
+        const activeDecalElement = this.svgElement.querySelector('[name*="decal"][active="true"]');
+        const activeDecalContainerElement = this.svgElement.querySelector('[name*="decal"][active="true"] [name="container"]');
         const activeDecalContentElement = this.svgElement.querySelector('[name*="decal"][active="true"] [name="content"]');
 
-        if (activeDecalContentElement instanceof SVGGraphicsElement) {
+        if (activeDecalElement instanceof SVGGraphicsElement && activeDecalContainerElement instanceof SVGGraphicsElement) {
             const svgWidth = parseFloat(this.svgElement.getAttribute('width') || '100');
             const svgHeight = parseFloat(this.svgElement.getAttribute('height') || '100');
             const xPos = uv.x * svgWidth;
             const yPos = uv.y * svgHeight;
-            const bbox = activeDecalContentElement.getBBox();
+            const bbox = this.getElementBBox(activeDecalContainerElement, activeDecalElement, false);
+
+            if (!bbox) return null;
 
             if (xPos >= bbox.x && xPos <= bbox.x + bbox.width && yPos >= bbox.y && yPos <= bbox.y + bbox.height) {
                 return activeDecalContentElement;
@@ -311,30 +448,34 @@ export class SVGDecals extends EventEmitter {
                 const decalContent = svgDecalElement?.querySelector('[name="content"]');
 
                 if (svgDecalElement instanceof SVGGraphicsElement && decalContent instanceof SVGGraphicsElement) {
-                    const bbox = decalContent?.getBBox();
-
-                    this.startDragCoordinates = new THREE.Vector2(
-                        uv.x - ((bbox.x) / parseFloat(this.svgElement!.getAttribute('width') || '100')),
-                        uv.y - ((bbox.y) / parseFloat(this.svgElement!.getAttribute('height') || '100'))
-                    );
-                    this.savedRotateAngle = parseFloat(svgDecalElement.getAttribute('rotate') || '0');
-
+                    // Calculate the center of the decal in UV coordinates
+                    const bbox = this.getElementBBox(decalContent, svgDecalElement, false);
+                    if (!bbox) return false;
                     const svgWidth = parseFloat(this.svgElement!.getAttribute('width') || '100');
                     const svgHeight = parseFloat(this.svgElement!.getAttribute('height') || '100');
+                    const centerSVGX = (bbox.x + bbox.width * 0.5) / svgWidth;
+                    const centerSVGY = (bbox.y + bbox.height * 0.5) / svgHeight;
+                    const decalUVCenter = new THREE.Vector2(centerSVGX, centerSVGY);
+                    const meshPointByDecalCenter = this.getMeshPointByUV(intersected.object, decalUVCenter);
+                    const screenPointForDecalCenter = this.reverseRaycast(meshPointByDecalCenter);
+                    const deltaX = screenPointForDecalCenter.x - this.startScalePos.x;
+                    const deltaY = screenPointForDecalCenter.y - this.startScalePos.y;
+                    const angleRadians = Math.atan2(uv.y - centerSVGY, uv.x - centerSVGX);
 
-                    
-                    const centerX = (bbox.x + (bbox.width * 0.5)) / svgWidth;
-                    const centerY = (bbox.y + (bbox.height * 0.5)) / svgHeight;
-                    const angleRadians = Math.atan2(uv.y - centerY, uv.x - centerX);
-
+                    console.log('bbox', bbox);
+                    // Save the initial values
+                    this.startDragCoordinates = new THREE.Vector2(
+                        uv.x - ((bbox.x) / svgWidth),
+                        uv.y - ((bbox.y) / svgHeight)
+                    );
+                    this.startScaleCenter = screenPointForDecalCenter;
+                    this.savedRotateAngle = parseFloat(svgDecalElement.getAttribute('rotate') || '0');
+                    this.savedScale = parseFloat(svgDecalElement.getAttribute('scale') || '1');
+                    this.distanceFromCenterOnStart = Math.sqrt(deltaX ** 2 + deltaY ** 2);
                     this.startRotateAngle = angleRadians * (180 / Math.PI);
 
 
-
-
-
-
-                    console.log('this.startDragCoordinates', this.startDragCoordinates);
+                    // Highlight the selected decal
                     this.activateDecal(svgDecalElement);
 
                     decalFound = true;
@@ -417,12 +558,12 @@ export class SVGDecals extends EventEmitter {
         
         if (!this.svgElement || !activeDecal || !(contentElement instanceof SVGGraphicsElement)) return null;
         
-        const contentBBox = contentElement?.getBBox();
+        const contentBBox = this.getElementBBox(contentElement, activeDecal, false);
         const svgWidth = parseFloat(this.svgElement.getAttribute('width') || '100');
         const svgHeight = parseFloat(this.svgElement.getAttribute('height') || '100');
         const intersects = this.getMouseIntersections(event);
 
-        if (intersects.length > 0) {
+        if (contentBBox && intersects.length > 0) {
             const intersected = intersects[0];
             const uv = this.getIntersectionUVCoordinates(intersected);
             
@@ -446,28 +587,55 @@ export class SVGDecals extends EventEmitter {
         return updatedSVGContent;
     }
 
+    private handleScaleDecal(event: MouseEvent): string | null {
+        const activeDecal = this.svgElement?.querySelector('g[name*="decal"][active="true"]') as SVGGraphicsElement | null;
+        const contentElement = activeDecal?.querySelector('[name="content"]');
+        
+        if (!this.svgElement || !activeDecal || !(contentElement instanceof SVGGraphicsElement)) return null;
+        
+        const deltaX = event.clientX - this.startScaleCenter.x;
+        const deltaY = event.clientY - this.startScaleCenter.y;
+        const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+
+        console.log('this.savedScalePos', this.savedScale);
+        console.log('this.distanceOnStart', this.distanceFromCenterOnStart);
+
+        // const scaleX = this.startScalePos.x - this.startScaleCenter.x;
+
+        const scale = this.savedScale * distance / this.distanceFromCenterOnStart;
+
+        console.log('distance', distance);
+        this.updateDecal(activeDecal.getAttribute('name') || '', {
+            scale: scale
+        });
+
+        const updatedSVGContent = new XMLSerializer().serializeToString(this.svgElement);
+
+        return updatedSVGContent;
+    }
+
     private activateDecal(decal: SVGGraphicsElement): void {
-        const contentElement = decal.querySelector('[name="content"]');
+        const containerElement = decal.querySelector('[name="container"]');
         
         decal.setAttribute('active', 'true');
-        contentElement?.setAttribute('class', 'dashed-border');
+        containerElement?.setAttribute('class', 'dashed-border');
 
         this.svgElement?.querySelectorAll(`[name*="decal"]`).forEach((el) => {
             if (el !== decal) {
-                const inactiveContentElement = el.querySelector('[name="content"]');
+                const inactiveContainerElement = el.querySelector('[name="container"]');
 
                 el.setAttribute('active', 'false');
-                inactiveContentElement?.removeAttribute('class');
+                inactiveContainerElement?.removeAttribute('class');
             }
         });
     }
 
     private deactivateAllDecals(): void {
         this.svgElement?.querySelectorAll(`[name*="decal"]`).forEach((el) => {
-            const inactiveContentElement = el.querySelector('[name="content"]');
+            const inactiveContainerElement = el.querySelector('[name="container"]');
 
             el.setAttribute('active', 'false');
-            inactiveContentElement?.removeAttribute('class');
+            inactiveContainerElement?.removeAttribute('class');
         });
     }
 
@@ -534,34 +702,10 @@ export class SVGDecals extends EventEmitter {
         }
     };
 
-    // private createControlButtons(): SVGGraphicsElement | null {
-    //     const group = document.createElementNS(svgNS, 'g');
-    //     const rotateIcon = document.createElementNS(svgNS, 'path');
-
-    //     rotateIcon.setAttribute('fill', 'none');
-    //     rotateIcon.setAttribute('stroke', 'currentColor');
-    //     rotateIcon.setAttribute('stroke-linecap', 'round');
-    //     rotateIcon.setAttribute('stroke-linejoin', 'round');
-    //     rotateIcon.setAttribute('stroke-width', '2');
-    //     rotateIcon.setAttribute('d', 'M19.95 11a8 8 0 1 0-.5 4m.5 5v-5h-5');
-    //     rotateIcon.setAttribute('name', 'control-rotate-icon');
-
-    //     group.appendChild(rotateIcon);
-
-    //     return group;
-    // }
-
-    private createDecalContainer(decalName: string): SVGGraphicsElement | null {
-        if (!this.svgElement) {
-            console.warn('SVG element is not available.');
-            return null;
-        }
-        
-        const group = document.createElementNS(svgNS, 'g');
-        const contentGroup = document.createElementNS(svgNS, 'g');
+    private createControlButtonsGroup(): SVGGraphicsElement {
         const controlsGroup = document.createElementNS(svgNS, 'g');
-
         const rotateIcon = document.createElementNS(svgNS, 'path');
+        const scaleIcon = document.createElementNS(svgNS, 'g');
 
         rotateIcon.setAttribute('fill', 'none');
         rotateIcon.setAttribute('stroke', 'currentColor');
@@ -570,11 +714,34 @@ export class SVGDecals extends EventEmitter {
         rotateIcon.setAttribute('stroke-width', '2');
         rotateIcon.setAttribute('d', 'M19.95 11a8 8 0 1 0-.5 4m.5 5v-5h-5');
         rotateIcon.setAttribute('name', 'control-rotate-icon');
-        controlsGroup.setAttribute('name', 'controls');
-        contentGroup.setAttribute('name', 'content');
-        
+        rotateIcon.setAttribute('transform', 'translate(0, 0)');
+
+        scaleIcon.setAttribute('fill', 'none');
+        scaleIcon.setAttribute('name', 'control-scale-icon');
+        scaleIcon.innerHTML = `<path d="m12.593 23.258l-.011.002l-.071.035l-.02.004l-.014-.004l-.071-.035q-.016-.005-.024.005l-.004.01l-.017.428l.005.02l.01.013l.104.074l.015.004l.012-.004l.104-.074l.012-.016l.004-.017l-.017-.427q-.004-.016-.017-.018m.265-.113l-.013.002l-.185.093l-.01.01l-.003.011l.018.43l.005.012l.008.007l.201.093q.019.005.029-.008l.004-.014l-.034-.614q-.005-.018-.02-.022m-.715.002a.02.02 0 0 0-.027.006l-.006.014l-.034.614q.001.018.017.024l.015-.002l.201-.093l.01-.008l.004-.011l.017-.43l-.003-.012l-.01-.01z"></path><path fill="currentColor" d="M11 3a1 1 0 0 1 .117 1.993L11 5H5v14h14v-6a1 1 0 0 1 1.993-.117L21 13v6a2 2 0 0 1-1.85 1.995L19 21H5a2 2 0 0 1-1.995-1.85L3 19V5a2 2 0 0 1 1.85-1.995L5 3zm8.75 0c.69 0 1.25.56 1.25 1.25V8a1 1 0 1 1-2 0V6.414L12.414 13H14a1 1 0 1 1 0 2h-3.75C9.56 15 9 14.44 9 13.75V10a1 1 0 0 1 2 0v1.586L17.586 5H16a1 1 0 1 1 0-2z"></path>`;
+
         controlsGroup.appendChild(rotateIcon);
-        group.appendChild(contentGroup);
+        controlsGroup.appendChild(scaleIcon);
+        controlsGroup.setAttribute('name', 'controls');
+
+        return controlsGroup;
+    }
+
+    private createDecalContainer(decalName: string): SVGGraphicsElement | null {
+        if (!this.svgElement) {
+            console.warn('SVG element is not available.');
+            return null;
+        }
+        
+        const group = document.createElementNS(svgNS, 'g');
+        const container = document.createElementNS(svgNS, 'g');
+        const contentGroup = document.createElementNS(svgNS, 'g');
+        const controlsGroup = this.createControlButtonsGroup();
+        
+        contentGroup.setAttribute('name', 'content');
+        container.setAttribute('name', 'container');
+        container.appendChild(contentGroup);
+        group.appendChild(container);
         group.appendChild(controlsGroup);
 
         group.setAttribute('name', `${decalName}`);
@@ -619,14 +786,20 @@ export class SVGDecals extends EventEmitter {
     }
 
     private updateControlsPosition(decal: SVGGraphicsElement): void {
-        const contentGroup = decal.querySelector('[name="content"]');
+        const containerGroup = decal.querySelector('[name="container"]');
         const controlGroup = decal.querySelector('[name="controls"]');
+        const rotateIcon = controlGroup?.querySelector('[name="control-rotate-icon"]');
 
-        if (contentGroup instanceof SVGGraphicsElement) {
-            const contentBBox = contentGroup?.getBBox();
+        if (containerGroup instanceof SVGGraphicsElement) {
+            const containerBBox = this.getElementBBox(containerGroup, decal, false);
+
+            if (!containerBBox) return;
 
             if (controlGroup instanceof SVGGraphicsElement) {
-                controlGroup.setAttribute('transform', `translate(${contentBBox.x + contentBBox.width}, ${contentBBox.y - 20})`);
+                controlGroup.setAttribute('transform', `translate(${containerBBox.x - 30}, ${containerBBox.y + containerBBox.height - 20})`);
+            }
+            if (rotateIcon instanceof SVGGraphicsElement) {
+                rotateIcon.setAttribute('transform', `translate(${containerBBox.width + 32}, ${-containerBBox.height + 16})`);
             }
         }
     }
@@ -636,6 +809,7 @@ export class SVGDecals extends EventEmitter {
         y?: number;
         fill?: string;
         rotate?: number;
+        scale?: number;
     }): string | null {
         if (!this.svgElement) {
             console.warn('SVG element is not available.');
@@ -663,12 +837,17 @@ export class SVGDecals extends EventEmitter {
                     }
                 }
             });
-
-            const bbox = contentElement.getBBox();
             const rotate = properties.rotate || decal.getAttribute('rotate') || 0;
+            const scale = properties.scale || parseFloat(decal.getAttribute('scale') || '1');
 
-            contentElement.setAttribute('transform', `rotate(${rotate}, ${bbox.x + (bbox.width * 0.5)}, ${bbox.y + (bbox.height * 0.5)})`);
-            decal.setAttribute('rotate', (rotate).toString());
+            contentElement.setAttribute('style', `
+                    transform-origin: center;
+                    transform: scale(${scale}) rotate(${rotate}deg);
+                    transform-box: fill-box;
+                `);
+
+            decal.setAttribute('rotate', rotate.toString());
+            decal.setAttribute('scale', scale.toString());
 
             this.updateControlsPosition(decal);
         }
