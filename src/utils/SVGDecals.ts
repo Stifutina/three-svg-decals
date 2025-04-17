@@ -28,6 +28,7 @@ export class SVGDecals extends EventEmitter {
     private dragging = false;
     private rotating = false;
     private scaling = false;
+    private deleting = false;
     private updating = false;
     private startDragCoordinates: THREE.Vector2 | null = null;
     private savedRotateAngle: number = 0;
@@ -114,7 +115,7 @@ export class SVGDecals extends EventEmitter {
 
     private initEventListeners() {
         window.addEventListener('mousedown', (event: MouseEvent) => {
-            if (!this.svgElement) return;
+            if (!this.svgElement || event.target !== this.renderer.domElement) return;
 
             this.startScalePos = {x: event.clientX, y: event.clientY};
 
@@ -132,6 +133,7 @@ export class SVGDecals extends EventEmitter {
             this.dragging = decalIntersected && contentIntersected !== null;
             this.rotating = decalIntersected && controlIntersected !== null && controlIntersected.getAttribute('name') === 'control-rotate-icon';
             this.scaling = decalIntersected && controlIntersected !== null && controlIntersected.getAttribute('name') === 'control-scale-icon';
+            this.deleting = decalIntersected && controlIntersected !== null && controlIntersected.getAttribute('name') === 'control-delete-icon';
             this.controls.enablePan = !this.dragging && !this.rotating && !this.scaling;
             this.controls.enableZoom = !this.dragging && !this.rotating && !this.scaling;
             this.controls.enableRotate = !this.dragging && !this.rotating && !this.scaling;
@@ -213,9 +215,14 @@ export class SVGDecals extends EventEmitter {
             }
         });
         window.addEventListener('mouseup', (event) => {
+            if (this.deleting) {
+                this.deleteActiveDecal();
+            }
+
             this.dragging = false;
             this.rotating = false;
             this.scaling = false;
+            this.deleting = false;
             this.controls.enablePan = !this.dragging && !this.rotating && !this.scaling;
             this.controls.enableZoom = !this.dragging && !this.rotating && !this.scaling;
             this.controls.enableRotate = !this.dragging && !this.rotating && !this.scaling;
@@ -369,16 +376,17 @@ export class SVGDecals extends EventEmitter {
         return bbox;
     }
 
-    private getDecalProperties(decal: SVGGraphicsElement): { text: string, color: string, scale: number, rotate: number, x: number, y: number } {
+    private getDecalProperties(decal: SVGGraphicsElement): { id: string, text: string, color: string, scale: number, rotate: number, x: number, y: number } {
         const textElement = decal.querySelector('[name="text"]') as SVGGraphicsElement;
         const text = textElement?.textContent || '';
-        const color = decal.getAttribute('fill') || 'black';
+        const color = decal.getAttribute('colorVal') || 'black';
         const scale = parseFloat(decal.getAttribute('scale') || '1');
         const rotate = parseFloat(decal.getAttribute('rotate') || '0');
         const x = parseFloat(decal.getAttribute('posX') || '0');
         const y = parseFloat(decal.getAttribute('posY') || '0');
+        const id = decal.getAttribute('name') || '';
 
-        return { text, color, scale, rotate, x, y };
+        return { text, color, scale, rotate, x, y, id };
     }
 
 
@@ -662,7 +670,7 @@ export class SVGDecals extends EventEmitter {
         });
     }
 
-    private deactivateAllDecals(): void {
+    public deactivateAllDecals(): void {
         this.svgElement?.querySelectorAll(`[name*="decal"]`).forEach((el) => {
             const inactiveContainerElement = el.querySelector('[name="container"]');
 
@@ -738,6 +746,7 @@ export class SVGDecals extends EventEmitter {
         const controlsGroup = document.createElementNS(svgNS, 'g');
         const rotateIcon = document.createElementNS(svgNS, 'path');
         const scaleIcon = document.createElementNS(svgNS, 'g');
+        const deleteIcon = document.createElementNS(svgNS, 'path');
 
         rotateIcon.setAttribute('fill', 'none');
         rotateIcon.setAttribute('stroke', 'currentColor');
@@ -752,8 +761,13 @@ export class SVGDecals extends EventEmitter {
         scaleIcon.setAttribute('name', 'control-scale-icon');
         scaleIcon.innerHTML = `<path d="m12.593 23.258l-.011.002l-.071.035l-.02.004l-.014-.004l-.071-.035q-.016-.005-.024.005l-.004.01l-.017.428l.005.02l.01.013l.104.074l.015.004l.012-.004l.104-.074l.012-.016l.004-.017l-.017-.427q-.004-.016-.017-.018m.265-.113l-.013.002l-.185.093l-.01.01l-.003.011l.018.43l.005.012l.008.007l.201.093q.019.005.029-.008l.004-.014l-.034-.614q-.005-.018-.02-.022m-.715.002a.02.02 0 0 0-.027.006l-.006.014l-.034.614q.001.018.017.024l.015-.002l.201-.093l.01-.008l.004-.011l.017-.43l-.003-.012l-.01-.01z"></path><path fill="currentColor" d="M11 3a1 1 0 0 1 .117 1.993L11 5H5v14h14v-6a1 1 0 0 1 1.993-.117L21 13v6a2 2 0 0 1-1.85 1.995L19 21H5a2 2 0 0 1-1.995-1.85L3 19V5a2 2 0 0 1 1.85-1.995L5 3zm8.75 0c.69 0 1.25.56 1.25 1.25V8a1 1 0 1 1-2 0V6.414L12.414 13H14a1 1 0 1 1 0 2h-3.75C9.56 15 9 14.44 9 13.75V10a1 1 0 0 1 2 0v1.586L17.586 5H16a1 1 0 1 1 0-2z"></path>`;
 
+        deleteIcon.setAttribute('name', 'control-delete-icon');
+        deleteIcon.setAttribute('fill', 'currentColor');
+        deleteIcon.setAttribute('d', 'M7 21q-.825 0-1.412-.587T5 19V6H4V4h5V3h6v1h5v2h-1v13q0 .825-.587 1.413T17 21zM17 6H7v13h10zM9 17h2V8H9zm4 0h2V8h-2zM7 6v13z');
+
         controlsGroup.appendChild(rotateIcon);
         controlsGroup.appendChild(scaleIcon);
+        controlsGroup.appendChild(deleteIcon);
         controlsGroup.setAttribute('name', 'controls');
 
         return controlsGroup;
@@ -819,10 +833,105 @@ export class SVGDecals extends EventEmitter {
         return decalGroup;
     }
 
+    private createImageDecal(uv: THREE.Vector2, decalName: string, image: Base64URLString, size: number): SVGGraphicsElement | null {
+        if (!this.svgElement) {
+            console.warn('SVG element is not available.');
+            return null;
+        }
+
+        const svgWidth = parseFloat(this.svgElement.getAttribute('width') || '100');
+        const svgHeight = parseFloat(this.svgElement.getAttribute('height') || '100');
+        const decalGroup = this.createDecalMainGroup(decalName);
+        const contentGroup = decalGroup?.querySelector('[name="content"]');
+        const imageElement = document.createElementNS(svgNS, 'image');
+
+        // Position
+        const x = uv.x * svgWidth;
+        const y = uv.y * svgHeight;
+
+        if (decalGroup && contentGroup) {
+            imageElement.setAttribute('x', x.toString());
+            imageElement.setAttribute('y', y.toString());
+            imageElement.setAttribute('width', size.toString());
+            imageElement.setAttribute('height', size.toString());
+            imageElement.setAttribute('href', image);
+            imageElement.setAttribute('name', 'image');
+            imageElement.setAttribute('preserveAspectRatio', 'xMinYMin meet');
+            imageElement.setAttribute('fill', 'black');
+            // Append both to the group
+            contentGroup.appendChild(imageElement);
+            decalGroup.setAttribute('posX', x.toString());
+            decalGroup.setAttribute('posY', y.toString());
+        }
+
+        return decalGroup;
+    }
+
+    private createIconDecal(uv: THREE.Vector2, decalName: string, icon: SVGElement): SVGGraphicsElement | null {
+        if (!this.svgElement) {
+            console.warn('SVG element is not available.');
+            return null;
+        }
+
+        const svgWidth = parseFloat(this.svgElement.getAttribute('width') || '100');
+        const svgHeight = parseFloat(this.svgElement.getAttribute('height') || '100');
+        const decalGroup = this.createDecalMainGroup(decalName);
+        const contentGroup = decalGroup?.querySelector('[name="content"]');
+        const iconElement = document.createElementNS(svgNS, 'g');
+        let fillAttr;
+        let strokeAttr;
+        let colorVal = 'black';
+
+        if (icon instanceof SVGSVGElement) {
+            // If icon is an SVG element, copy its children into the iconElement group
+            Array.from(icon.childNodes).forEach((child) => {
+                // Only append element nodes (skip text/comments)
+                if (child.nodeType === Node.ELEMENT_NODE && child instanceof Element) {
+                    fillAttr = child.getAttribute('fill');
+                    strokeAttr = child.getAttribute('stroke');
+
+                    iconElement.appendChild(child.cloneNode(true));
+                }
+            });
+        } else {
+            // If icon is a single SVG element (like <path>), just clone and append it
+            fillAttr = icon.getAttribute('fill');
+            strokeAttr = icon.getAttribute('stroke');
+
+            iconElement.appendChild(icon.cloneNode(true));
+        }
+
+        if (fillAttr && fillAttr !== 'none') {
+            colorVal = fillAttr;
+        } else if (strokeAttr && strokeAttr !== 'none') {
+            colorVal = strokeAttr;
+        }
+
+        // Position
+        const x = uv.x * svgWidth;
+        const y = uv.y * svgHeight;
+
+        if (decalGroup && contentGroup) {
+            iconElement.setAttribute('x', x.toString());
+            iconElement.setAttribute('y', y.toString());
+            iconElement.setAttribute('name', 'icon');
+            iconElement.setAttribute('transform', `translate(${x}, ${y})`);
+            // Append both to the group
+            contentGroup.appendChild(iconElement);
+
+            decalGroup.setAttribute('colorVal', colorVal);
+            decalGroup.setAttribute('posX', x.toString());
+            decalGroup.setAttribute('posY', y.toString());
+        }
+
+        return decalGroup;
+    }
+
     private updateControlsPosition(decal: SVGGraphicsElement): void {
         const containerGroup = decal.querySelector('[name="container"]');
         const controlGroup = decal.querySelector('[name="controls"]');
         const rotateIcon = controlGroup?.querySelector('[name="control-rotate-icon"]');
+        const deleteIcon = controlGroup?.querySelector('[name="control-delete-icon"]');
 
         if (containerGroup instanceof SVGGraphicsElement) {
             const containerBBox = this.getElementBBox(containerGroup, decal, false);
@@ -833,8 +942,20 @@ export class SVGDecals extends EventEmitter {
                 controlGroup.setAttribute('transform', `translate(${containerBBox.x - 30}, ${containerBBox.y + containerBBox.height - 20})`);
             }
             if (rotateIcon instanceof SVGGraphicsElement) {
-                rotateIcon.setAttribute('transform', `translate(${containerBBox.width + 32}, ${-containerBBox.height + 16})`);
+                rotateIcon.setAttribute('transform', `translate(${containerBBox.width + 36}, ${-containerBBox.height + 16})`);
             }
+            if (deleteIcon instanceof SVGGraphicsElement) {
+                deleteIcon.setAttribute('transform', `translate(${containerBBox.width + 10}, 24)`);
+            }
+        }
+    }
+
+    public deleteActiveDecal(): void {
+        const activeDecal = this.svgElement?.querySelector('g[name*="decal"][active="true"]') as SVGGraphicsElement | null;
+
+        if (activeDecal) {
+            activeDecal.remove();
+            this.decalSVGTexture?.updateSVGTexture();
         }
     }
 
@@ -844,6 +965,7 @@ export class SVGDecals extends EventEmitter {
         fill?: string;
         rotate?: number;
         scale?: number;
+        text?: string;
     }): string | null {
         if (!this.svgElement) {
             console.warn('SVG element is not available.');
@@ -864,14 +986,39 @@ export class SVGDecals extends EventEmitter {
                         child.setAttribute('y', properties.y?.toString());
                         decal.setAttribute('posY', properties.y.toString());                        
                     }
-                    
                     if (properties.fill) {
-                        child.setAttribute('fill', properties.fill);
-                        decal.setAttribute('fill', properties.fill.toString());
+                        if (child.tagName === 'text') {
+                            child.setAttribute('fill', properties.fill);
+                        } else if (child.tagName === 'g' && child.getAttribute('name') === 'icon') {
+                            Array.from(child.children).forEach((iconChild) => {
+                                if (properties.fill && iconChild instanceof SVGElement) {
+                                    const fillAttr = iconChild.getAttribute('fill');
+                                    const strokeAttr = iconChild.getAttribute('stroke');
+
+                                    if (fillAttr && fillAttr !== 'none') {
+                                        iconChild.setAttribute('fill', properties.fill);
+                                    } else if (strokeAttr && strokeAttr !== 'none') {
+                                        iconChild.setAttribute('stroke', properties.fill);
+                                        iconChild.setAttribute('fill', 'none');
+                                    }
+                                }
+                            });
+                        }
+                        
+                        decal.setAttribute('colorVal', properties.fill.toString());
+                    }
+                    if (child.tagName === 'text' && properties.text) {
+                        child.textContent = properties.text;
+                    }
+                    if (child.tagName === 'g' && child.getAttribute('name') === 'icon') {
+                        const x = properties.x || parseFloat(decal.getAttribute('posX') || '0');
+                        const y = properties.y || parseFloat(decal.getAttribute('posY') || '0');
+
+                        child.setAttribute('transform', `translate(${x}, ${y})`);
                     }
                 }
             });
-            const rotate = properties.rotate || decal.getAttribute('rotate') || 0;
+            const rotate = (properties.rotate !== undefined) ? properties.rotate : decal.getAttribute('rotate') || 0;
             const scale = properties.scale || parseFloat(decal.getAttribute('scale') || '1');
 
             contentElement.setAttribute('style', `
@@ -886,12 +1033,19 @@ export class SVGDecals extends EventEmitter {
             this.updateControlsPosition(decal);
         }
 
+        if (!this.updating) {
+            this.decalSVGTexture?.updateSVGTexture();
+        }
+        
+
         const updatedSVGContent = new XMLSerializer().serializeToString(this.svgElement);
         return updatedSVGContent;
     }
 
     public putDecal(position?: THREE.Vector2, params?: {
         text?: string;
+        image?: Base64URLString;
+        icon?: SVGElement;
         size?: number;
         fill?: string;
         rotate?: number;
@@ -923,7 +1077,17 @@ export class SVGDecals extends EventEmitter {
         }
 
         // const decal = this.createCircleDecal(uv, decalName);
-        const decal = this.createTextDecal(uv, decalName, params?.text || 'TEST', params?.size || 40);
+        let decal;
+
+        if (params?.text) {
+            decal = this.createTextDecal(uv, decalName, params?.text, params?.size || 40);
+        } else if (params?.image) {
+            decal = this.createImageDecal(uv, decalName, params?.image, params?.size || 100);
+        } else if (params?.icon) {
+            decal = this.createIconDecal(uv, decalName, params?.icon);
+        } else {
+            decal = this.createTextDecal(uv, decalName, 'TEST', params?.size || 40);
+        }
 
         if (!decal) {
             console.warn('Failed to create decal.');
@@ -940,6 +1104,7 @@ export class SVGDecals extends EventEmitter {
 
     public downloadDecalTexture(filename: string = 'decal.svg'): void {
         this.deactivateAllDecals();
+        this.decalSVGTexture?.updateSVGTexture();
         this.decalSVGTexture?.downloadSVG(filename);
     }
 

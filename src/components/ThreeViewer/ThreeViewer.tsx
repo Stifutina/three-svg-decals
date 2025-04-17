@@ -41,7 +41,7 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
     const decals = useRef<SVGDecals | null>(null);
     const svgTextureInstance = useRef<SVGTexture | null>(null);
     const decalText = useRef<string>('Decal');
-    const [selectedDecalData, setSelectedDecalData] = useState<{ text: string; color: string; scale: number; rotate: number; x: number; y: number } | null>(null);
+    const [selectedDecalData, setSelectedDecalData] = useState<{ id: string, text: string; color: string; scale: number; rotate: number; x: number; y: number } | null>(null);
     const decalProps = {
         text: '',
         color: '',
@@ -215,7 +215,71 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
             
                     updateRender();
                 },
-            }, 'addDecal').name('Add Decal');
+            }, 'addDecal').name('Add Text Decal');
+
+            gui.current.add({
+                addDecal: () => {
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.accept = 'image/svg+xml';
+                    input.onchange = async (e: Event) => {
+                        const file = (e.target as HTMLInputElement).files?.[0];
+                        if (file) {
+                            if (file.size > 1 * 1024 * 1024) {
+                                alert('SVG file size must be less than 1MB.');
+                                return;
+                            }
+                            const text = await file.text();
+                            try {
+                                const parser = new DOMParser();
+                                const doc = parser.parseFromString(text, 'image/svg+xml');
+                                const svg = doc.querySelector('svg');
+                                if (svg instanceof SVGSVGElement) {
+                                    decals.current?.putDecal(undefined, { icon: svg });
+                                    updateRender();
+                                } else {
+                                    alert('Invalid SVG file.');
+                                }
+                            } catch (err) {
+                                console.error('Error parsing SVG:', err);
+                                alert('Failed to parse SVG.');
+                            }
+                        }
+                    };
+                    input.click();
+            
+                    updateRender();
+                },
+            }, 'addDecal').name('Add Icon Decal');
+
+            gui.current.add({
+                addDecal: () => {
+                    const input = document.createElement('input');
+
+                    input.type = 'file';
+                    input.accept = 'image/png, image/jpeg';
+                    input.onchange = (e: Event) => {
+                        const file = (e.target as HTMLInputElement).files?.[0];
+                        if (file) {
+                            if (file.size > 5 * 1024 * 1024) {
+                                alert('File size must be less than 5MB.');
+                                return;
+                            }
+                            const reader = new FileReader();
+                            reader.onload = () => {
+                                const base64String = `data:${file.type};base64,${btoa(
+                                    new Uint8Array(reader.result as ArrayBuffer)
+                                        .reduce((data, byte) => data + String.fromCharCode(byte), '')
+                                )}`;
+                                decals.current?.putDecal(undefined, { image: base64String });
+                                updateRender();
+                            };
+                            reader.readAsArrayBuffer(file);
+                        }
+                    };
+                    input.click();
+                },
+            }, 'addDecal').name('Add Image Decal');
 
             gui.current.add({
                 downloadDecalTexture: () => {
@@ -225,6 +289,7 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
 
             gui.current.add({
                 downloadBaseTexture: () => {
+                    decals.current?.deactivateAllDecals();
                     svgTextureInstance.current?.downloadSVG();
                 }
             }, 'downloadBaseTexture').name('Download Base Texture');
@@ -233,6 +298,9 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
                 downloadMergedTexture: () => {
                     const baseSVGTexture = svgTextureInstance.current?.getSVGElement();
                     const decalSVGTexture = decals.current?.getSVGElement();
+                    
+                    decals.current?.deactivateAllDecals();
+                    
                     if (baseSVGTexture && decalSVGTexture) {
                         svgTextureInstance.current?.mergeAndDownloadSVG([baseSVGTexture, decalSVGTexture]);
                     }
@@ -241,24 +309,58 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
 
             const decalFolder = gui.current.addFolder('Selected Decal Data');
             
-            decalFolder.add(decalProps, 'text').name('Text').listen();
-            decalFolder.add(decalProps, 'color').name('Color').listen();
-            decalFolder.add(decalProps, 'scale').name('Scale').listen();
-            decalFolder.add(decalProps, 'rotate').name('Rotate').listen();
-            decalFolder.add(decalProps, 'x').name('X').listen();
-            decalFolder.add(decalProps, 'y').name('Y').listen();
-
-            decalFolder.close();
+            decalFolder.add(decalProps, 'text').name('Text');
+            decalFolder.addColor(decalProps, 'color').name('Color');
+            decalFolder.add(decalProps, 'scale', -10, 10, 0.001).name('Scale');
+            decalFolder.add(decalProps, 'rotate', 0, 360, 0.001).name('Rotate');
+            decalFolder.add(decalProps, 'x', 0, 3000, 0.001).name('X');
+            decalFolder.add(decalProps, 'y', 0, 3000, 0.001).name('Y');
         }
     }, []);
 
+    const updateDecalText = useCallback((value: string) => {
+        if (selectedDecalData) decals.current?.updateDecal(selectedDecalData.id, {text: value});
+        updateRender();
+    }, [selectedDecalData]);
+
+    const updateDecalColor = useCallback((value: string) => {
+        if (selectedDecalData) decals.current?.updateDecal(selectedDecalData.id, {fill: value});
+        updateRender();
+    }, [selectedDecalData]);
+
+    const updateDecalScale = useCallback((value: number) => {
+        if (selectedDecalData) decals.current?.updateDecal(selectedDecalData.id, {scale: value});
+        updateRender();
+    }, [selectedDecalData]);
+
+    const updateDecalRotate = useCallback((value: number) => {
+        if (selectedDecalData) decals.current?.updateDecal(selectedDecalData.id, {rotate: value});
+        updateRender();
+    }, [selectedDecalData]);
+
+    const updateDecalX = useCallback((value: number) => {
+        if (selectedDecalData) decals.current?.updateDecal(selectedDecalData.id, {x: value});
+        updateRender();
+    }, [selectedDecalData]);
+
+    const updateDecalY = useCallback((value: number) => {
+        if (selectedDecalData) decals.current?.updateDecal(selectedDecalData.id, {y: value});
+        updateRender();
+    }, [selectedDecalData]);
+
     useEffect(() => {
         if (gui.current && selectedDecalData) {
+            gui.current.folders[0].controllers[0].onChange(updateDecalText);
             gui.current.folders[0].controllers[0].setValue(selectedDecalData.text);
+            gui.current.folders[0].controllers[1].onChange(updateDecalColor);
             gui.current.folders[0].controllers[1].setValue(selectedDecalData.color);
+            gui.current.folders[0].controllers[2].onChange(updateDecalScale);
             gui.current.folders[0].controllers[2].setValue(selectedDecalData.scale);
+            gui.current.folders[0].controllers[3].onChange(updateDecalRotate);
             gui.current.folders[0].controllers[3].setValue(selectedDecalData.rotate);
+            gui.current.folders[0].controllers[4].onChange(updateDecalX);
             gui.current.folders[0].controllers[4].setValue(selectedDecalData.x);
+            gui.current.folders[0].controllers[5].onChange(updateDecalY);
             gui.current.folders[0].controllers[5].setValue(selectedDecalData.y);
         }
     }, [selectedDecalData]);
@@ -315,6 +417,7 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
                             rotating: boolean,
                             scaling: boolean,
                             props: {
+                                id: string;
                                 text: string;
                                 color: string;
                                 scale: number;
