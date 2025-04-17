@@ -138,7 +138,22 @@ export class SVGDecals extends EventEmitter {
 
             this.decalSVGTexture?.updateSVGTexture();
 
-            this.emit('update', [{ event, updatedSVGContent, dragging: this.dragging }]);
+            if (decalIntersected) {
+                const activeDecal = this.svgElement.querySelector('g[name*="decal"][active="true"]') as SVGGraphicsElement | null;
+                
+                if (!activeDecal) return;
+
+                const actualProps = this.getDecalProperties(activeDecal);
+
+                this.emit('update', [{ 
+                    event, 
+                    updatedSVGContent, 
+                    dragging: this.dragging,
+                    rotating: this.rotating,
+                    scaling: this.scaling,
+                    props: actualProps
+                }]);
+            }
         });
 
         window.addEventListener('mousemove', (event: MouseEvent) => {
@@ -167,6 +182,12 @@ export class SVGDecals extends EventEmitter {
                 console.timeLog('dragging', 'updatedSVGContent');
 
                 if (updatedSVGContent) {
+                    const activeDecal = this.svgElement?.querySelector('g[name*="decal"][active="true"]') as SVGGraphicsElement | null;
+                
+                    if (!activeDecal) return;
+
+                    const actualProps = this.getDecalProperties(activeDecal);
+
                     this.decalSVGTexture?.updateSVGTexture(() => {
                         console.timeEnd('dragging');
 
@@ -174,7 +195,14 @@ export class SVGDecals extends EventEmitter {
                             this.updating = false;
                         });
                     });
-                    this.emit('update', [{ event, updatedSVGContent, dragging: this.dragging }]);
+                    this.emit('update', [{ 
+                        event, 
+                        updatedSVGContent, 
+                        dragging: this.dragging,
+                        rotating: this.rotating,
+                        scaling: this.scaling,
+                        props: actualProps
+                    }]);
 
                     console.timeLog('dragging', 'this.emit update');
                 } else {
@@ -341,6 +369,18 @@ export class SVGDecals extends EventEmitter {
         return bbox;
     }
 
+    private getDecalProperties(decal: SVGGraphicsElement): { text: string, color: string, scale: number, rotate: number, x: number, y: number } {
+        const textElement = decal.querySelector('[name="text"]') as SVGGraphicsElement;
+        const text = textElement?.textContent || '';
+        const color = decal.getAttribute('fill') || 'black';
+        const scale = parseFloat(decal.getAttribute('scale') || '1');
+        const rotate = parseFloat(decal.getAttribute('rotate') || '0');
+        const x = parseFloat(decal.getAttribute('posX') || '0');
+        const y = parseFloat(decal.getAttribute('posY') || '0');
+
+        return { text, color, scale, rotate, x, y };
+    }
+
 
     private getDecalElementByUV(uv: THREE.Vector2): Element | null {
         if (!this.svgElement) return null;
@@ -462,7 +502,6 @@ export class SVGDecals extends EventEmitter {
                     const deltaY = screenPointForDecalCenter.y - this.startScalePos.y;
                     const angleRadians = Math.atan2(uv.y - centerSVGY, uv.x - centerSVGX);
 
-                    console.log('bbox', bbox);
                     // Save the initial values
                     this.startDragCoordinates = new THREE.Vector2(
                         uv.x - ((bbox.x) / svgWidth),
@@ -578,7 +617,7 @@ export class SVGDecals extends EventEmitter {
             deg += this.savedRotateAngle; // previous value
     
             this.updateDecal(activeDecal.getAttribute('name') || '', {
-                rotate: deg
+                rotate: deg % 360
             });
         }
 
@@ -596,15 +635,8 @@ export class SVGDecals extends EventEmitter {
         const deltaX = event.clientX - this.startScaleCenter.x;
         const deltaY = event.clientY - this.startScaleCenter.y;
         const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
-
-        console.log('this.savedScalePos', this.savedScale);
-        console.log('this.distanceOnStart', this.distanceFromCenterOnStart);
-
-        // const scaleX = this.startScalePos.x - this.startScaleCenter.x;
-
         const scale = this.savedScale * distance / this.distanceFromCenterOnStart;
 
-        console.log('distance', distance);
         this.updateDecal(activeDecal.getAttribute('name') || '', {
             scale: scale
         });
@@ -727,7 +759,7 @@ export class SVGDecals extends EventEmitter {
         return controlsGroup;
     }
 
-    private createDecalContainer(decalName: string): SVGGraphicsElement | null {
+    private createDecalMainGroup(decalName: string): SVGGraphicsElement | null {
         if (!this.svgElement) {
             console.warn('SVG element is not available.');
             return null;
@@ -759,17 +791,17 @@ export class SVGDecals extends EventEmitter {
         const svgWidth = parseFloat(this.svgElement.getAttribute('width') || '100');
         const svgHeight = parseFloat(this.svgElement.getAttribute('height') || '100');
         const textElement = document.createElementNS(svgNS, 'text');
-        const container = this.createDecalContainer(decalName);
-        const contentGroup = container?.querySelector('[name="content"]');
+        const decalGroup = this.createDecalMainGroup(decalName);
+        const contentGroup = decalGroup?.querySelector('[name="content"]');
 
         // Position
         const x = uv.x * svgWidth;
         const y = uv.y * svgHeight;
 
-        if (container && contentGroup) {
+        if (decalGroup && contentGroup) {
             // Text styling and position
-            textElement.setAttribute('x', x.toString()); // Add some padding inside rect
-            textElement.setAttribute('y', y.toString()); // Rough vertical centering
+            textElement.setAttribute('x', x.toString());
+            textElement.setAttribute('y', y.toString());
             textElement.setAttribute('font-size', size.toString());
             textElement.setAttribute('text-anchor', 'start');
             textElement.setAttribute('dominant-baseline', 'text-before-edge');
@@ -780,9 +812,11 @@ export class SVGDecals extends EventEmitter {
 
             // Append both to the group
             contentGroup.appendChild(textElement);
+            decalGroup.setAttribute('posX', x.toString());
+            decalGroup.setAttribute('posY', y.toString());
         }
 
-        return container;
+        return decalGroup;
     }
 
     private updateControlsPosition(decal: SVGGraphicsElement): void {
@@ -856,7 +890,13 @@ export class SVGDecals extends EventEmitter {
         return updatedSVGContent;
     }
 
-    public putDecal(position?: THREE.Vector2): string | null {
+    public putDecal(position?: THREE.Vector2, params?: {
+        text?: string;
+        size?: number;
+        fill?: string;
+        rotate?: number;
+        scale?: number;
+    }): string | null {
         const decalId = Math.random().toString(36).substring(2, 15);
         const decalName = `decal-${decalId}`;
         let uv = position;
@@ -883,7 +923,7 @@ export class SVGDecals extends EventEmitter {
         }
 
         // const decal = this.createCircleDecal(uv, decalName);
-        const decal = this.createTextDecal(uv, decalName, 'TEST', 40);
+        const decal = this.createTextDecal(uv, decalName, params?.text || 'TEST', params?.size || 40);
 
         if (!decal) {
             console.warn('Failed to create decal.');

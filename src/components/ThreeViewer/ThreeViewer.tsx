@@ -40,6 +40,16 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
     const allowAnimationTimeout = useRef<number>(0);
     const decals = useRef<SVGDecals | null>(null);
     const svgTextureInstance = useRef<SVGTexture | null>(null);
+    const decalText = useRef<string>('Decal');
+    const [selectedDecalData, setSelectedDecalData] = useState<{ text: string; color: string; scale: number; rotate: number; x: number; y: number } | null>(null);
+    const decalProps = {
+        text: '',
+        color: '',
+        scale: 0,
+        rotate: 0,
+        x: 0,
+        y: 0,
+    };
 
     const loadModel = useCallback(() => {
         const gltfLoader = new GLTFLoader();
@@ -190,12 +200,21 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
                 sRGB: THREE.SRGBColorSpace,
             });
 
+            gui.current.add(
+                {
+                    decalText: decalText.current
+                },
+                'decalText'
+            )
+            .name('New Decal Text')
+            .onChange((value: string) => decalText.current = value);
+
             gui.current.add({
                 addDecal: () => {
-                    decals.current?.putDecal();
-
+                    decals.current?.putDecal(undefined, {text: decalText.current});
+            
                     updateRender();
-                }
+                },
             }, 'addDecal').name('Add Decal');
 
             gui.current.add({
@@ -219,8 +238,30 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
                     }
                 }
             }, 'downloadMergedTexture').name('Download Merged Texture');
+
+            const decalFolder = gui.current.addFolder('Selected Decal Data');
+            
+            decalFolder.add(decalProps, 'text').name('Text').listen();
+            decalFolder.add(decalProps, 'color').name('Color').listen();
+            decalFolder.add(decalProps, 'scale').name('Scale').listen();
+            decalFolder.add(decalProps, 'rotate').name('Rotate').listen();
+            decalFolder.add(decalProps, 'x').name('X').listen();
+            decalFolder.add(decalProps, 'y').name('Y').listen();
+
+            decalFolder.close();
         }
     }, []);
+
+    useEffect(() => {
+        if (gui.current && selectedDecalData) {
+            gui.current.folders[0].controllers[0].setValue(selectedDecalData.text);
+            gui.current.folders[0].controllers[1].setValue(selectedDecalData.color);
+            gui.current.folders[0].controllers[2].setValue(selectedDecalData.scale);
+            gui.current.folders[0].controllers[3].setValue(selectedDecalData.rotate);
+            gui.current.folders[0].controllers[4].setValue(selectedDecalData.x);
+            gui.current.folders[0].controllers[5].setValue(selectedDecalData.y);
+        }
+    }, [selectedDecalData]);
 
     const initScene = useCallback(() => {
         if (mountRef.current && !sceneReady) {
@@ -266,7 +307,23 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
                 if (props.textureColorUrl?.includes('.svg') && camera.current) {
                     decals.current = new SVGDecals(scene.current, model.current, camera.current, controls.current, renderer.current);
 
-                    decals.current.on('update', () => {
+                    decals.current.on('update', (data: unknown) => {
+                        const typedData = data as { 
+                            event: MouseEvent, 
+                            updatedSVGContent: string, 
+                            dragging: boolean,
+                            rotating: boolean,
+                            scaling: boolean,
+                            props: {
+                                text: string;
+                                color: string;
+                                scale: number;
+                                rotate: number;
+                                x: number;
+                                y: number;
+                            }
+                        };
+                        setSelectedDecalData(typedData.props || null);
                         updateRender();
                     });
                 }
