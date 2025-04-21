@@ -55,10 +55,10 @@ export class SVGTexture {
 
         const ctx = this.canvas.getContext('2d');
 
-        console.time(`updateSVGTexture ${this.uniqueId}`);
-
         if (ctx) {
             const img = new Image();
+
+            console.time(`updateSVGTexture ${this.uniqueId}`);
 
             img.onload = () => {
                 ctx.clearRect(0, 0, this.canvas?.width || 100, this.canvas?.height || 100);
@@ -97,7 +97,7 @@ export class SVGTexture {
         document.body.removeChild(link);
     }
 
-    public mergeAndDownloadSVG(svgElements: SVGSVGElement[], filename: string = 'merged.svg'): void {
+    public static mergeAndDownloadSVG(svgElements: (SVGSVGElement|null|undefined)[], filename: string = 'merged.svg'): void {
         if (!svgElements || svgElements.length === 0) {
             console.error('No SVG elements provided for merging');
             return;
@@ -112,11 +112,18 @@ export class SVGTexture {
         svgElements.forEach((svgElement) => {
             const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
             
-            Array.from(svgElement.children).forEach(child => {
-                group.appendChild(child.cloneNode(true));
-            });
-            mergedSVG.appendChild(group);
+            if (svgElement instanceof SVGSVGElement) {
+                Array.from(svgElement.children).forEach(child => {
+                    group.appendChild(child.cloneNode(true));
+                });
+                mergedSVG.appendChild(group);
+            }
         });
+
+        if (mergedSVG.children.length === 0) {
+            console.error('No SVG elements to merge');
+            return;
+        }
 
         const blob = new Blob([mergedSVG.outerHTML], { type: 'image/svg+xml' });
         const link = document.createElement('a');

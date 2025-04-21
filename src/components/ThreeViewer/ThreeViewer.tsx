@@ -16,6 +16,7 @@ interface ThreeViewerProps {
     textureColorUrl?: string;
     textureNormalUrl?: string;
     textureAmbientOcclusionUrl?: string;
+    textureRoughnessUrl?: string;
 }
 
 
@@ -39,12 +40,12 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
     const allowAnimation = useRef<boolean>(false);
     const allowAnimationTimeout = useRef<number>(0);
     const decals = useRef<SVGDecals | null>(null);
-    const svgTextureInstance = useRef<SVGTexture | null>(null);
+    const svgBaseTextureInstance = useRef<SVGTexture | null>(null);
     const decalText = useRef<string>('Decal');
     const [selectedDecalData, setSelectedDecalData] = useState<{ id: string, text: string; color: string; scale: number; rotate: number; x: number; y: number } | null>(null);
     const decalProps = {
         text: '',
-        color: '',
+        color: '#a3e8ff',
         scale: 0,
         rotate: 0,
         x: 0,
@@ -86,10 +87,11 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
             rgbeLoader.load(props.environmentUrl, (envMap) => {
                 envMap.mapping = THREE.EquirectangularRefractionMapping;
                 scene.current.environment = envMap;
+                scene.current.environmentIntensity = 2;
             });
         }
 
-        const ambientLight = new THREE.AmbientLight(new THREE.Color(1, 1, 1), 1);
+        const ambientLight = new THREE.AmbientLight(new THREE.Color(1, 1, 1), 2);
              
         scene.current.add(ambientLight);
         lights.current.push(ambientLight);
@@ -120,11 +122,7 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
             name: 'baseMaterial',
             visible: true,
         });
-        const SCALING = 20;
-
-        // baseMaterial.flatShading = true;
-        // baseMaterial.lightMap = scene.current.environment;
-        // baseMaterial.lightMapIntensity = 0.8;
+        const SCALING = 2;
 
         await new Promise<void>(resolve => {
             if (props.textureColorUrl) {
@@ -132,10 +130,11 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
                     fetch(props.textureColorUrl)
                         .then(response => response.text())
                         .then(svgContent => {
-                            svgTextureInstance.current = new SVGTexture(svgContent, baseMaterial);
+                            svgBaseTextureInstance.current = new SVGTexture(svgContent, baseMaterial);
 
                             if (baseMaterial.map) {
                                 baseMaterial.map.flipY = false;
+                                baseMaterial.map.needsUpdate = true;
                             }
 
                             resolve();
@@ -147,6 +146,9 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
                 } else {
                     baseMaterial.map = textureLoader.current.load(props.textureColorUrl, () => {
                         if (baseMaterial.map) {
+                            baseMaterial.map.wrapS = THREE.RepeatWrapping;
+                            baseMaterial.map.wrapT = THREE.RepeatWrapping;
+                            baseMaterial.map.repeat.set(SCALING, SCALING);
                             baseMaterial.map.needsUpdate = true;
                         }
                         resolve();
@@ -171,10 +173,30 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
             baseMaterial.aoMap.wrapT = THREE.RepeatWrapping;
             baseMaterial.aoMap.repeat.set(SCALING, SCALING);
         }
+        if (props.textureRoughnessUrl) {
+            baseMaterial.roughnessMap = textureLoader.current.load(props.textureRoughnessUrl);
+            baseMaterial.roughnessMap.wrapS = THREE.RepeatWrapping;
+            baseMaterial.roughnessMap.wrapT = THREE.RepeatWrapping;
+            baseMaterial.roughnessMap.repeat.set(SCALING, SCALING);
+        }
 
         model.current?.traverse((child) => {
             if (child instanceof THREE.Mesh) {
-                child.material = baseMaterial;
+                if (child.name.includes('glass')) {
+                    child.material = new THREE.MeshPhysicalMaterial({
+                        color: 0xffffff,
+                        name: 'glassMaterial',
+                        transparent: true,
+                        opacity: 0.5,
+                        transmission: 1,
+                        roughness: 0,
+                        ior: 1.5,
+                        thickness: 0.1
+                    });
+                } else {
+                    child.material = baseMaterial;
+                }
+                
             }
         });
 
@@ -182,11 +204,12 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
     }, [props]);
 
     const setupGUI = useCallback(() => {
-        if (controls.current?.target && !gui.current) {
+        if (controls.current?.target && camera.current && !gui.current) {
             gui.current = new GUI({ width: 300 });
             gui.current.add(controls.current.target, 'y', -3, 3, 0.01).name('Controls Target Y').onChange(() => controls.current?.update());
             gui.current.add(controls.current.target, 'z', -3, 3, 0.01).name('Controls Target Z').onChange(() => controls.current?.update());
-            
+            gui.current.add(camera.current.position, 'z', -3, 3, 0.01).name('Camera Position Z').onChange(() => controls.current?.update());
+            gui.current.add(camera.current.position, 'y', -3, 3, 0.01).name('Camera Position Y').onChange(() => controls.current?.update());
 
             gui.current.add(renderer.current, 'toneMapping', {
                 No: THREE.NoToneMapping,
@@ -211,7 +234,44 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
 
             gui.current.add({
                 addDecal: () => {
-                    decals.current?.putDecal(undefined, {text: decalText.current});
+                    const newDecalName = decals.current?.putDecal(new THREE.Vector2(-0.07, 1600), {
+                        text: 'NEW DECAL',
+                        fill: '#990061',
+                        id: 'decal-wm4dgxf4wr',
+                        rotate: 95.488
+                    });
+
+                    if (newDecalName) {
+                        gui.current?.add({selectDecal: () => {
+                            decals.current?.selectDecal(newDecalName);
+                            updateRender();
+                        }}, 'selectDecal').name(`Select ${newDecalName}`);
+                        gui.current?.add({deleteDecal: () => {
+                            decals.current?.deleteDecal(newDecalName);
+                            updateRender();
+                        }}, 'deleteDecal').name(`Delete ${newDecalName}`);
+                    }
+                    
+            
+                    updateRender();
+                },
+            }, 'addDecal').name('Add Predefined Decal');
+
+            gui.current.add({
+                addDecal: () => {
+                    const newDecalName = decals.current?.putDecal(undefined, {text: decalText.current, fill: decalProps.color});
+
+                    if (newDecalName) {
+                        gui.current?.add({selectDecal: () => {
+                            decals.current?.selectDecal(newDecalName);
+                            updateRender();
+                        }}, 'selectDecal').name(`Select ${newDecalName}`);
+                        gui.current?.add({deleteDecal: () => {
+                            decals.current?.deleteDecal(newDecalName);
+                            updateRender();
+                        }}, 'deleteDecal').name(`Delete ${newDecalName}`);
+                    }
+                    
             
                     updateRender();
                 },
@@ -235,7 +295,19 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
                                 const doc = parser.parseFromString(text, 'image/svg+xml');
                                 const svg = doc.querySelector('svg');
                                 if (svg instanceof SVGSVGElement) {
-                                    decals.current?.putDecal(undefined, { icon: svg });
+                                    const newDecalName = decals.current?.putDecal(undefined, { icon: svg });
+                                    
+                                    if (newDecalName) {
+                                        gui.current?.add({selectDecal: () => {
+                                            decals.current?.selectDecal(newDecalName);
+                                            updateRender();
+                                        }}, 'selectDecal').name(`Select ${newDecalName}`);
+                                        gui.current?.add({deleteDecal: () => {
+                                            decals.current?.deleteDecal(newDecalName);
+                                            updateRender();
+                                        }}, 'deleteDecal').name(`Delete ${newDecalName}`);
+                                    }
+                                    
                                     updateRender();
                                 } else {
                                     alert('Invalid SVG file.');
@@ -271,7 +343,19 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
                                     new Uint8Array(reader.result as ArrayBuffer)
                                         .reduce((data, byte) => data + String.fromCharCode(byte), '')
                                 )}`;
-                                decals.current?.putDecal(undefined, { image: base64String });
+                                const newDecalName = decals.current?.putDecal(undefined, { image: base64String });
+
+                                if (newDecalName) {
+                                    gui.current?.add({selectDecal: () => {
+                                        decals.current?.selectDecal(newDecalName);
+                                        updateRender();
+                                    }}, 'selectDecal').name(`Select ${newDecalName}`);
+                                    gui.current?.add({deleteDecal: () => {
+                                        decals.current?.deleteDecal(newDecalName);
+                                        updateRender();
+                                    }}, 'deleteDecal').name(`Delete ${newDecalName}`);
+                                }
+
                                 updateRender();
                             };
                             reader.readAsArrayBuffer(file);
@@ -283,29 +367,34 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
 
             gui.current.add({
                 downloadDecalTexture: () => {
-                    decals.current?.downloadDecalTexture();
+                    decals.current?.deactivateAllDecals();
+                    SVGTexture.mergeAndDownloadSVG([decals.current?.getSVGElement()]);
                 }
             }, 'downloadDecalTexture').name('Download Decal Texture');
 
             gui.current.add({
                 downloadBaseTexture: () => {
                     decals.current?.deactivateAllDecals();
-                    svgTextureInstance.current?.downloadSVG();
+                    if (svgBaseTextureInstance.current) {
+                        SVGTexture.mergeAndDownloadSVG([svgBaseTextureInstance.current.getSVGElement()]);
+                    } else {
+                        console.error('Base SVG texture not found');
+                    }
                 }
-            }, 'downloadBaseTexture').name('Download Base Texture');
+            }, 'downloadBaseTexture').name('Download Base SVG Texture');
 
             gui.current.add({
                 downloadMergedTexture: () => {
-                    const baseSVGTexture = svgTextureInstance.current?.getSVGElement();
+                    const baseSVGTexture = svgBaseTextureInstance.current?.getSVGElement();
                     const decalSVGTexture = decals.current?.getSVGElement();
                     
                     decals.current?.deactivateAllDecals();
-                    
-                    if (baseSVGTexture && decalSVGTexture) {
-                        svgTextureInstance.current?.mergeAndDownloadSVG([baseSVGTexture, decalSVGTexture]);
+
+                    if (baseSVGTexture || decalSVGTexture) {
+                        SVGTexture.mergeAndDownloadSVG([baseSVGTexture, decalSVGTexture]);
                     }
                 }
-            }, 'downloadMergedTexture').name('Download Merged Texture');
+            }, 'downloadMergedTexture').name('Download Merged SVG Texture');
 
             const decalFolder = gui.current.addFolder('Selected Decal Data');
             
@@ -315,6 +404,27 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
             decalFolder.add(decalProps, 'rotate', 0, 360, 0.001).name('Rotate');
             decalFolder.add(decalProps, 'x', 0, 3000, 0.001).name('X');
             decalFolder.add(decalProps, 'y', 0, 3000, 0.001).name('Y');
+
+
+            gui.current.add({
+                enableInteractions: () => {
+                    decals.current?.enableDecalInteractions();
+                },
+            }, 'enableInteractions').name('Enable Interactions');
+
+            gui.current.add({
+                disableInteractions: () => {
+                    decals.current?.disableDecalInteractions();
+                },
+            }, 'disableInteractions').name('Disable Interactions');
+
+            gui.current.add({
+                getDecalProps: () => {
+                    const props = decals.current?.getDecalProperties();
+
+                    console.log('Decal Properties:', props);
+                },
+            }, 'getDecalProps').name('Get Selected Decal Properties');
         }
     }, []);
 
@@ -377,13 +487,13 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
             renderer.current.shadowMap.type = THREE.PCFSoftShadowMap;
             renderer.current.shadowMap.enabled = true;
 
-            camera.current = new THREE.PerspectiveCamera(75, aspectRatio.current, 0.1, 200);
+            camera.current = new THREE.PerspectiveCamera(60, aspectRatio.current, 0.01, 200);
             controls.current = new OrbitControls(camera.current, renderer.current.domElement);
             mountRef.current.appendChild(renderer.current.domElement);
             controls.current.enableDamping = true;
-            camera.current.position.z = 50;
-            camera.current.position.y = 1.4;
-            controls.current.target.set(0, 1.3, 0);
+            camera.current.position.z = 0.2;
+            camera.current.position.y = 0.07;
+            controls.current.target.set(0, 0, 0);
 
             controls.current?.update();
 
@@ -406,7 +516,7 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
     
                 await initializeMaterials();
     
-                if (props.textureColorUrl?.includes('.svg') && camera.current) {
+                if (camera.current) {
                     decals.current = new SVGDecals(scene.current, model.current, camera.current, controls.current, renderer.current);
 
                     decals.current.on('update', (data: unknown) => {

@@ -6,10 +6,11 @@ function App() {
   return (
     <>
       <ThreeViewer 
-        modelUrl="./models/RO21.glb"
+        modelUrl="./models/glasses.glb"
         environmentUrl="./textures/hdri/hdri_1k.hdr"
-        textureColorUrl='./textures/color/color_map.svg'
-        textureNormalUrl="./textures/fabric032/Fabric032_1K-JPG_NormalDX.jpg"
+        textureColorUrl='./textures/plastic/Plastic006_1K-JPG_Color.jpg'
+        textureNormalUrl="./textures/plastic/Plastic006_1K-JPG_NormalDX.jpg"
+        textureRoughnessUrl='./textures/plastic/Plastic006_1K-JPG_Roughness.jpg'
       />
     </>
   )
