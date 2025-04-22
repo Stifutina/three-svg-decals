@@ -234,11 +234,11 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
 
             gui.current.add({
                 addDecal: () => {
-                    const newDecalName = decals.current?.putDecal(new THREE.Vector2(-0.07, 1600), {
+                    const newDecalName = decals.current?.putDecal(new THREE.Vector2(814, 1370), {
                         text: 'NEW DECAL',
                         fill: '#990061',
                         id: 'decal-wm4dgxf4wr',
-                        rotate: 95.488
+                        rotate: 0
                     });
 
                     if (newDecalName) {
@@ -408,15 +408,25 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
 
             gui.current.add({
                 enableInteractions: () => {
-                    decals.current?.enableDecalInteractions();
+                    if (decals.current) 
+                        decals.current.decalInteractionsEnabled = true;
                 },
             }, 'enableInteractions').name('Enable Interactions');
 
             gui.current.add({
                 disableInteractions: () => {
-                    decals.current?.disableDecalInteractions();
+                    if (decals.current) 
+                        decals.current.decalInteractionsEnabled = false;
                 },
             }, 'disableInteractions').name('Disable Interactions');
+
+
+            gui.current.add({
+                placeDecalMode: () => {
+                    if (decals.current) 
+                        decals.current.placeDecalModeEnabled = true;
+                },
+            }, 'placeDecalMode').name('Put Decal By click');
 
             gui.current.add({
                 getDecalProps: () => {

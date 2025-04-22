@@ -6,7 +6,7 @@ function App() {
   return (
     <>
       <ThreeViewer 
-        modelUrl="./models/glasses.glb"
+        modelUrl="./models/glasses_fixed_uv_compress.glb"
         environmentUrl="./textures/hdri/hdri_1k.hdr"
         textureColorUrl='./textures/plastic/Plastic006_1K-JPG_Color.jpg'
         textureNormalUrl="./textures/plastic/Plastic006_1K-JPG_NormalDX.jpg"

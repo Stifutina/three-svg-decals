@@ -32,6 +32,8 @@ export class SVGDecals extends EventEmitter {
     private readonly ATTR_CONTROL_ROTATE = 'control-rotate-icon';
     private readonly ATTR_CONTROL_SCALE = 'control-scale-icon';
     private readonly ATTR_CONTROL_DELETE = 'control-delete-icon';
+    private readonly SVG_WIDTH = 2048;
+    private readonly SVG_HEIGHT = 2048;
 
     private scene: THREE.Scene;
     private mainModel: THREE.Object3D | null = null;
@@ -42,6 +44,7 @@ export class SVGDecals extends EventEmitter {
     private svgElement: SVGSVGElement | null = null;
     private maxAttemps = 10;
     private interactionEnabled = false;
+    private placeDecalMode = false;
     private dragging = false;
     private rotating = false;
     private scaling = false;
@@ -55,7 +58,7 @@ export class SVGDecals extends EventEmitter {
     private startScalePos: {x: number, y: number} = {x: 0, y: 0};
     private startScaleCenter: {x: number, y: number} = {x: 0, y: 0};
     private decalSVGInitial = `
-            <svg xmlns="${this.SVG_NS}" width="2048" height="2048" fill="none" viewBox="0 0 2048 2048" version="1.1" xml:space="preserve">
+            <svg xmlns="${this.SVG_NS}" width="${this.SVG_WIDTH}" height="${this.SVG_HEIGHT}" fill="none" viewBox="0 0 2048 2048" version="1.1" xml:space="preserve">
                 <style>
                     .dashed-border {
                         outline: 1px dashed black;
@@ -109,7 +112,7 @@ export class SVGDecals extends EventEmitter {
 
                 decalMesh.material = this.decalMaterial;
                 decalMesh.material.map.flipY = false;
-                decalMesh.material.visible = false;
+                // decalMesh.material.visible = false;
                 decalMesh.name = `${child.name}-${this.DECAL_MESH_PREFIX}`;
                 
                 child.parent.add(decalMesh);
@@ -124,20 +127,27 @@ export class SVGDecals extends EventEmitter {
         this.svgElement = this.decalSVGTexture?.getSVGElement() || null;
         this.initEventListeners();
     }
-
     /**
-     * Enables decal interactions.
+     * Gets or sets whether decal interactions are enabled.
      */
-    public enableDecalInteractions() {
-        this.interactionEnabled = true;
+    public get decalInteractionsEnabled(): boolean {
+        return this.interactionEnabled;
+    }
+    public set decalInteractionsEnabled(value: boolean) {
+        this.interactionEnabled = value;
+        if (!value) {
+            this.deactivateAllDecals();
+        }
     }
 
     /**
-     * Disables decal interactions and deactivates all decals.
+     * Gets or sets whether place decal mode is enabled.
      */
-    public disableDecalInteractions() {
-        this.deactivateAllDecals();
-        this.interactionEnabled = false;
+    public get placeDecalModeEnabled(): boolean {
+        return this.placeDecalMode;
+    }
+    public set placeDecalModeEnabled(value: boolean) {
+        this.placeDecalMode = value;
     }
 
     /**
@@ -274,14 +284,12 @@ export class SVGDecals extends EventEmitter {
         if (!this.updating) {
             // const x = properties.x || parseFloat(decal?.getAttribute(this.ATTR_POSX) || '0');
             // const y = properties.y || parseFloat(decal?.getAttribute(this.ATTR_POSY) || '0');
-            // const svgWidth = parseFloat(this.svgElement.getAttribute('width') || '100');
-            // const svgHeight = parseFloat(this.svgElement.getAttribute('height') || '100');
             
             this.decalSVGTexture?.updateSVGTexture();
 
             // const activeMesh = this.getMeshByUVCoords(new THREE.Vector2(
-            //     x/svgWidth,
-            //     y/svgHeight
+            //     x/this.SVG_WIDTH,
+            //     y/this.SVG_HEIGHT
             // ));
 
             // console.log('activeMesh', activeMesh);
@@ -337,11 +345,8 @@ export class SVGDecals extends EventEmitter {
                 return null;
             }
         } else {
-            const svgWidth = parseFloat(this.svgElement.getAttribute('width') || '100');
-            const svgHeight = parseFloat(this.svgElement.getAttribute('height') || '100');
-
-            uv.x /= svgWidth;
-            uv.y /= svgHeight;
+            uv.x /= this.SVG_WIDTH;
+            uv.y /= this.SVG_HEIGHT;
         }
         if (!uv) {
             console.warn('No UV coordinates found.');
@@ -362,7 +367,7 @@ export class SVGDecals extends EventEmitter {
         } else if (params?.icon) {
             decal = this.createIconDecal(uv, decalName, params?.icon);
         } else {
-            decal = this.createTextDecal(uv, decalName, 'TEST', params?.size || 40);
+            decal = this.createTextDecal(uv, decalName, 'Decal', params?.size || 40);
         }
 
         if (!decal) {
@@ -375,7 +380,7 @@ export class SVGDecals extends EventEmitter {
         this.updateDecal(decalName, {
             rotate: params?.rotate || 0,
             scale: params?.scale || 1,
-            fill: params?.fill || 'black'
+            fill: params?.fill || '#7d7d7d'
         });
 
         return decalName;
@@ -464,12 +469,19 @@ export class SVGDecals extends EventEmitter {
             this.startScalePos = {x: event.clientX, y: event.clientY};
 
             const intersects = this.getMouseIntersections(event);
+
+            if (this.placeDecalMode && intersects.length && intersects[0].uv) {
+                this.putDecal(new THREE.Vector2(intersects[0].uv.x * this.SVG_WIDTH, intersects[0].uv.y * this.SVG_HEIGHT));
+
+                this.placeDecalMode = false;
+            }
+
             const decalIntersected = this.selectDecalInIntersection(intersects);
             const controlIntersected = this.useControlByClickedPosition(intersects);
             const contentIntersected = this.useContentByClickedPosition(intersects);
             const updatedSVGContent = this.XMLSerializer.serializeToString(this.svgElement);
 
-            console.log('intersects[0].uv', intersects[0].uv, intersects[0].point, intersects[0].object, intersects[0].normal);
+            // console.log('intersects[0].uv', intersects[0].uv, intersects[0].point, intersects[0].object, intersects[0].normal);
 
             console.log('controlIntersected', controlIntersected);
             console.log('contentIntersected', contentIntersected);
@@ -794,11 +806,9 @@ export class SVGDecals extends EventEmitter {
         const decals = this.svgElement.querySelectorAll(`[${this.ATTR_NAME}*="decal"]`);
 
         for (const decal of decals) {
-            if (decal instanceof SVGGraphicsElement) {    
-                const svgWidth = parseFloat(this.svgElement.getAttribute('width') || '100');
-                const svgHeight = parseFloat(this.svgElement.getAttribute('height') || '100');
-                const xPos = uv.x * svgWidth;
-                const yPos = uv.y * svgHeight;
+            if (decal instanceof SVGGraphicsElement) {
+                const xPos = uv.x * this.SVG_WIDTH;
+                const yPos = uv.y * this.SVG_HEIGHT;
                 const bbox = decal.getBBox();
 
                 if (xPos >= bbox.x && xPos <= bbox.x + bbox.width && yPos >= bbox.y && yPos <= bbox.y + bbox.height) {
@@ -830,10 +840,8 @@ export class SVGDecals extends EventEmitter {
 
         for (const button of buttons || []) {
             if (this.svgElement && button instanceof SVGGraphicsElement) {
-                const svgWidth = parseFloat(this.svgElement.getAttribute('width') || '100');
-                const svgHeight = parseFloat(this.svgElement.getAttribute('height') || '100');
-                const xPos = uv.x * svgWidth;
-                const yPos = uv.y * svgHeight;
+                const xPos = uv.x * this.SVG_WIDTH;
+                const yPos = uv.y * this.SVG_HEIGHT;
                 const bbox = button.getBBox();
                 const transform = activeDecalControlElement?.getAttribute('transform');
                 const buttonTransform = button.getAttribute('transform');
@@ -889,10 +897,8 @@ export class SVGDecals extends EventEmitter {
         const activeDecalContentElement = this.svgElement.querySelector(`[${this.ATTR_NAME}*="decal"][${this.ATTR_ACTIVE}="true"] [${this.ATTR_NAME}="${this.ATTR_CONTENT}"]`);
 
         if (activeDecalElement instanceof SVGGraphicsElement && activeDecalContainerElement instanceof SVGGraphicsElement) {
-            const svgWidth = parseFloat(this.svgElement.getAttribute('width') || '100');
-            const svgHeight = parseFloat(this.svgElement.getAttribute('height') || '100');
-            const xPos = uv.x * svgWidth;
-            const yPos = uv.y * svgHeight;
+            const xPos = uv.x * this.SVG_WIDTH;
+            const yPos = uv.y * this.SVG_HEIGHT;
             const bbox = this.getElementBBox(activeDecalContainerElement, activeDecalElement, false);
 
             if (!bbox) return null;
@@ -1040,17 +1046,14 @@ export class SVGDecals extends EventEmitter {
             console.timeLog('dragging', 'get uv');
 
             if (uv) {
-                const svgWidth = parseFloat(this.svgElement.getAttribute('width') || '100');
-                const svgHeight = parseFloat(this.svgElement.getAttribute('height') || '100');
-
                 if (this.startDragCoordinates) {
                     uv.x -= this.startDragCoordinates.x;
                     uv.y -= this.startDragCoordinates.y;
                 }
 
                 this.updateDecal(activeDecal.getAttribute(this.ATTR_NAME) || '', {
-                    x: uv.x * svgWidth,
-                    y: uv.y * svgHeight,
+                    x: uv.x * this.SVG_WIDTH,
+                    y: uv.y * this.SVG_HEIGHT,
                 });
 
                 console.timeLog('dragging', 'update svg');
@@ -1083,8 +1086,6 @@ export class SVGDecals extends EventEmitter {
         if (!this.svgElement || !activeDecal || !(contentElement instanceof SVGGraphicsElement)) return null;
         
         const contentBBox = this.getElementBBox(contentElement, activeDecal, false);
-        const svgWidth = parseFloat(this.svgElement.getAttribute('width') || '100');
-        const svgHeight = parseFloat(this.svgElement.getAttribute('height') || '100');
         const intersects = this.getMouseIntersections(event);
 
         if (contentBBox && intersects.length > 0) {
@@ -1093,8 +1094,8 @@ export class SVGDecals extends EventEmitter {
             
             if (!uv) return null;
     
-            const centerX = (contentBBox.x + (contentBBox.width * 0.5)) / svgWidth;
-            const centerY = (contentBBox.y + (contentBBox.height * 0.5)) / svgHeight;
+            const centerX = (contentBBox.x + (contentBBox.width * 0.5)) / this.SVG_WIDTH;
+            const centerY = (contentBBox.y + (contentBBox.height * 0.5)) / this.SVG_HEIGHT;
             const angleRadians = Math.atan2(uv.y - centerY, uv.x - centerX);
             let deg = ((angleRadians * (180 / Math.PI) + 360)) % 360;
     
@@ -1293,25 +1294,24 @@ export class SVGDecals extends EventEmitter {
      */
     private createControlButtonsGroup(): SVGGraphicsElement {
         const controlsGroup = document.createElementNS(this.SVG_NS, 'g');
-        const rotateIcon = document.createElementNS(this.SVG_NS, 'path');
+        const rotateIcon = document.createElementNS(this.SVG_NS, 'g');
         const scaleIcon = document.createElementNS(this.SVG_NS, 'g');
         const deleteIcon = document.createElementNS(this.SVG_NS, 'path');
 
         rotateIcon.setAttribute('fill', 'none');
-        rotateIcon.setAttribute('stroke', 'currentColor');
-        rotateIcon.setAttribute('stroke-linecap', 'round');
-        rotateIcon.setAttribute('stroke-linejoin', 'round');
-        rotateIcon.setAttribute('stroke-width', '2');
-        rotateIcon.setAttribute('d', 'M19.95 11a8 8 0 1 0-.5 4m.5 5v-5h-5');
+        rotateIcon.innerHTML = `<path fill="white" stroke="black" d="M12 6.05c-3.869 0-7 3.126-7 6.975C5 16.875 8.131 20 12 20s7-3.126 7-6.975a6.9 6.9 0 0 0-.673-2.987a1 1 0 0 1 1.806-.86A8.9 8.9 0 0 1 21 13.024C21 17.985 16.968 22 12 22s-9-4.015-9-8.975s4.032-8.974 9-8.974c1.24 0 2.425.25 3.502.705l-.777 1.843A7 7 0 0 0 12 6.05"/>
+            <path fill="white" stroke="black" d="M13.806 2.233a.857.857 0 0 1 1.15.385l1.332 2.683c.267.537.046 1.19-.493 1.456l-2.691 1.329a.857.857 0 1 1-.758-1.536L14.47 5.5l-1.053-2.118a.857.857 0 0 1 .388-1.149Z"/>`;
         rotateIcon.setAttribute(this.ATTR_NAME, this.ATTR_CONTROL_ROTATE);
         rotateIcon.setAttribute('transform', 'translate(0, 0)');
 
         scaleIcon.setAttribute('fill', 'none');
         scaleIcon.setAttribute(this.ATTR_NAME, this.ATTR_CONTROL_SCALE);
-        scaleIcon.innerHTML = `<path d="m12.593 23.258l-.011.002l-.071.035l-.02.004l-.014-.004l-.071-.035q-.016-.005-.024.005l-.004.01l-.017.428l.005.02l.01.013l.104.074l.015.004l.012-.004l.104-.074l.012-.016l.004-.017l-.017-.427q-.004-.016-.017-.018m.265-.113l-.013.002l-.185.093l-.01.01l-.003.011l.018.43l.005.012l.008.007l.201.093q.019.005.029-.008l.004-.014l-.034-.614q-.005-.018-.02-.022m-.715.002a.02.02 0 0 0-.027.006l-.006.014l-.034.614q.001.018.017.024l.015-.002l.201-.093l.01-.008l.004-.011l.017-.43l-.003-.012l-.01-.01z"></path><path fill="currentColor" d="M11 3a1 1 0 0 1 .117 1.993L11 5H5v14h14v-6a1 1 0 0 1 1.993-.117L21 13v6a2 2 0 0 1-1.85 1.995L19 21H5a2 2 0 0 1-1.995-1.85L3 19V5a2 2 0 0 1 1.85-1.995L5 3zm8.75 0c.69 0 1.25.56 1.25 1.25V8a1 1 0 1 1-2 0V6.414L12.414 13H14a1 1 0 1 1 0 2h-3.75C9.56 15 9 14.44 9 13.75V10a1 1 0 0 1 2 0v1.586L17.586 5H16a1 1 0 1 1 0-2z"></path>`;
+        scaleIcon.innerHTML = `<path fill="white" stroke="black" d="m12.593 23.258l-.011.002l-.071.035l-.02.004l-.014-.004l-.071-.035q-.016-.005-.024.005l-.004.01l-.017.428l.005.02l.01.013l.104.074l.015.004l.012-.004l.104-.074l.012-.016l.004-.017l-.017-.427q-.004-.016-.017-.018m.265-.113l-.013.002l-.185.093l-.01.01l-.003.011l.018.43l.005.012l.008.007l.201.093q.019.005.029-.008l.004-.014l-.034-.614q-.005-.018-.02-.022m-.715.002a.02.02 0 0 0-.027.006l-.006.014l-.034.614q.001.018.017.024l.015-.002l.201-.093l.01-.008l.004-.011l.017-.43l-.003-.012l-.01-.01z"/>
+            <path fill="white" stroke="black" d="M11 3a1 1 0 0 1 .117 1.993L11 5H5v14h14v-6a1 1 0 0 1 1.993-.117L21 13v6a2 2 0 0 1-1.85 1.995L19 21H5a2 2 0 0 1-1.995-1.85L3 19V5a2 2 0 0 1 1.85-1.995L5 3zm8.75 0c.69 0 1.25.56 1.25 1.25V8a1 1 0 1 1-2 0V6.414L12.414 13H14a1 1 0 1 1 0 2h-3.75C9.56 15 9 14.44 9 13.75V10a1 1 0 0 1 2 0v1.586L17.586 5H16a1 1 0 1 1 0-2z"/>`;
 
         deleteIcon.setAttribute(this.ATTR_NAME, this.ATTR_CONTROL_DELETE);
-        deleteIcon.setAttribute('fill', 'currentColor');
+        deleteIcon.setAttribute('fill', 'white');
+        deleteIcon.setAttribute('stroke', 'black');
         deleteIcon.setAttribute('d', 'M7 21q-.825 0-1.412-.587T5 19V6H4V4h5V3h6v1h5v2h-1v13q0 .825-.587 1.413T17 21zM17 6H7v13h10zM9 17h2V8H9zm4 0h2V8h-2zM7 6v13z');
 
         controlsGroup.appendChild(rotateIcon);
@@ -1378,14 +1378,12 @@ export class SVGDecals extends EventEmitter {
         }
 
         const decalGroup = this.createDecalMainParentElement(decalName);
-        const svgWidth = parseFloat(this.svgElement.getAttribute('width') || '100');
-        const svgHeight = parseFloat(this.svgElement.getAttribute('height') || '100');
         const textElement = document.createElementNS(this.SVG_NS, 'text');
         const contentGroup = decalGroup?.querySelector(`[${this.ATTR_NAME}="${this.ATTR_CONTENT}"]`);
 
         // Position
-        const x = uv.x * svgWidth;
-        const y = uv.y * svgHeight;
+        const x = uv.x * this.SVG_WIDTH;
+        const y = uv.y * this.SVG_HEIGHT;
 
         if (decalGroup && contentGroup) {
             // Text styling and position
@@ -1394,7 +1392,7 @@ export class SVGDecals extends EventEmitter {
             textElement.setAttribute('font-size', size.toString());
             textElement.setAttribute('text-anchor', 'start');
             textElement.setAttribute('dominant-baseline', 'text-before-edge');
-            textElement.setAttribute('fill', 'black');
+            textElement.setAttribute('fill', '#7d7d7d');
             textElement.setAttribute('font-family', 'sans-serif');
             textElement.setAttribute(this.ATTR_NAME, this.ATTR_TEXT);
             textElement.textContent = text;
@@ -1428,14 +1426,12 @@ export class SVGDecals extends EventEmitter {
         }
 
         const decalGroup = this.createDecalMainParentElement(decalName);
-        const svgWidth = parseFloat(this.svgElement.getAttribute('width') || '100');
-        const svgHeight = parseFloat(this.svgElement.getAttribute('height') || '100');
         const contentGroup = decalGroup?.querySelector(`[${this.ATTR_NAME}="${this.ATTR_CONTENT}"]`);
         const imageElement = document.createElementNS(this.SVG_NS, 'image');
 
         // Position
-        const x = uv.x * svgWidth;
-        const y = uv.y * svgHeight;
+        const x = uv.x * this.SVG_WIDTH;
+        const y = uv.y * this.SVG_HEIGHT;
 
         if (decalGroup && contentGroup) {
             imageElement.setAttribute('x', x.toString());
@@ -1475,8 +1471,6 @@ export class SVGDecals extends EventEmitter {
         }
 
         const decalGroup = this.createDecalMainParentElement(decalName);
-        const svgWidth = parseFloat(this.svgElement.getAttribute('width') || '100');
-        const svgHeight = parseFloat(this.svgElement.getAttribute('height') || '100');
         const contentGroup = decalGroup?.querySelector(`[${this.ATTR_NAME}="${this.ATTR_CONTENT}"]`);
         const iconElement = document.createElementNS(this.SVG_NS, 'g');
         let fillAttr;
@@ -1506,8 +1500,8 @@ export class SVGDecals extends EventEmitter {
         }
 
         // Position
-        const x = uv.x * svgWidth;
-        const y = uv.y * svgHeight;
+        const x = uv.x * this.SVG_WIDTH;
+        const y = uv.y * this.SVG_HEIGHT;
 
         if (decalGroup && contentGroup) {
             iconElement.setAttribute('x', x.toString());
