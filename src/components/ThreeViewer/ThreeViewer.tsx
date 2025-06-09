@@ -14,6 +14,8 @@ interface ThreeViewerProps {
     modelUrl: string;
     environmentUrl?: string;
     textureColorUrl?: string;
+    matcapTextureUrl?: string;
+    toonGradientUrl?: string;
     textureNormalUrl?: string;
     textureAmbientOcclusionUrl?: string;
     textureRoughnessUrl?: string;
@@ -91,10 +93,17 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
             });
         }
 
-        const ambientLight = new THREE.AmbientLight(new THREE.Color(1, 1, 1), 2);
-             
-        scene.current.add(ambientLight);
+        const ambientLight = new THREE.AmbientLight(new THREE.Color(1, 1, 1), 5);
+        const pointLight = new THREE.PointLight(new THREE.Color(1, 1, 1), 5, 100);
+        pointLight.position.set(0, 1, 2);
+        pointLight.castShadow = true;
+        pointLight.shadow.mapSize.set(1024, 1024);
+
+        scene.current.add(ambientLight, pointLight);
         lights.current.push(ambientLight);
+        lights.current.push(pointLight);
+
+        console.log('scene.current', scene.current);
     }, []);
 
     const updateSizes = useCallback(() => {
@@ -117,88 +126,135 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
 
 
     const initializeMaterials = useCallback(async () => {
-        const baseMaterial = new THREE.MeshStandardMaterial({
-            color: 0xffffff,
-            name: 'baseMaterial',
-            visible: true,
-        });
+        let baseMaterial
+        
+        if (props.toonGradientUrl) {
+            baseMaterial = new THREE.MeshToonMaterial();
+        } else if (props.matcapTextureUrl) {
+            baseMaterial = new THREE.MeshMatcapMaterial();
+        } else {
+            baseMaterial = new THREE.MeshStandardMaterial({
+                color: 0xffffff,
+                name: 'baseMaterial',
+                visible: true,
+            });
+        }
+
         const SCALING = 2;
 
-        await new Promise<void>(resolve => {
-            if (props.textureColorUrl) {
-                if (props.textureColorUrl.endsWith('.svg')) {
-                    fetch(props.textureColorUrl)
-                        .then(response => response.text())
-                        .then(svgContent => {
-                            svgBaseTextureInstance.current = new SVGTexture(svgContent, baseMaterial);
+        if (baseMaterial instanceof THREE.MeshStandardMaterial) {
+            await new Promise<void>(resolve => {
+                if (props.textureColorUrl) {
+                    if (props.textureColorUrl.endsWith('.svg')) {
+                        fetch(props.textureColorUrl)
+                            .then(response => response.text())
+                            .then(svgContent => {
+                                svgBaseTextureInstance.current = new SVGTexture(svgContent, baseMaterial);
 
+                                if (baseMaterial.map) {
+                                    baseMaterial.map.flipY = false;
+                                    baseMaterial.map.needsUpdate = true;
+                                }
+
+                                resolve();
+                            })
+                            .catch(error => {
+                                console.error('Error loading SVG texture:', error);
+                                resolve();
+                            });
+                    } else {
+                        baseMaterial.map = textureLoader.current.load(props.textureColorUrl, () => {
                             if (baseMaterial.map) {
-                                baseMaterial.map.flipY = false;
+                                baseMaterial.map.wrapS = THREE.RepeatWrapping;
+                                baseMaterial.map.wrapT = THREE.RepeatWrapping;
+                                baseMaterial.map.repeat.set(SCALING, SCALING);
                                 baseMaterial.map.needsUpdate = true;
                             }
-
-                            resolve();
-                        })
-                        .catch(error => {
-                            console.error('Error loading SVG texture:', error);
                             resolve();
                         });
+                    }
                 } else {
-                    baseMaterial.map = textureLoader.current.load(props.textureColorUrl, () => {
-                        if (baseMaterial.map) {
-                            baseMaterial.map.wrapS = THREE.RepeatWrapping;
-                            baseMaterial.map.wrapT = THREE.RepeatWrapping;
-                            baseMaterial.map.repeat.set(SCALING, SCALING);
-                            baseMaterial.map.needsUpdate = true;
-                        }
-                        resolve();
-                    });
+                    resolve();
                 }
-            } else {
-                resolve();
-            }
-        });
+            });
 
-        if (props.textureNormalUrl) {
-            baseMaterial.normalMapType = THREE.TangentSpaceNormalMap;
-            baseMaterial.normalMap = textureLoader.current.load(props.textureNormalUrl);
-            baseMaterial.normalMap.wrapS = THREE.RepeatWrapping;
-            baseMaterial.normalMap.wrapT = THREE.RepeatWrapping;
-            baseMaterial.normalMap.repeat.set(SCALING, SCALING);
-            baseMaterial.normalScale.set(0.5, 0.5);
-        }
-        if (props.textureAmbientOcclusionUrl) {
-            baseMaterial.aoMap = textureLoader.current.load(props.textureAmbientOcclusionUrl);
-            baseMaterial.aoMap.wrapS = THREE.RepeatWrapping;
-            baseMaterial.aoMap.wrapT = THREE.RepeatWrapping;
-            baseMaterial.aoMap.repeat.set(SCALING, SCALING);
-        }
-        if (props.textureRoughnessUrl) {
-            baseMaterial.roughnessMap = textureLoader.current.load(props.textureRoughnessUrl);
-            baseMaterial.roughnessMap.wrapS = THREE.RepeatWrapping;
-            baseMaterial.roughnessMap.wrapT = THREE.RepeatWrapping;
-            baseMaterial.roughnessMap.repeat.set(SCALING, SCALING);
+
+            if (props.textureNormalUrl) {
+                baseMaterial.normalMapType = THREE.TangentSpaceNormalMap;
+                baseMaterial.normalMap = textureLoader.current.load(props.textureNormalUrl);
+                baseMaterial.normalMap.wrapS = THREE.RepeatWrapping;
+                baseMaterial.normalMap.wrapT = THREE.RepeatWrapping;
+                baseMaterial.normalMap.repeat.set(SCALING, SCALING);
+                baseMaterial.normalScale.set(0.5, 0.5);
+            }
+            if (props.textureAmbientOcclusionUrl) {
+                baseMaterial.aoMap = textureLoader.current.load(props.textureAmbientOcclusionUrl);
+                baseMaterial.aoMap.wrapS = THREE.RepeatWrapping;
+                baseMaterial.aoMap.wrapT = THREE.RepeatWrapping;
+                baseMaterial.aoMap.repeat.set(SCALING, SCALING);
+            }
+            if (props.textureRoughnessUrl) {
+                baseMaterial.roughnessMap = textureLoader.current.load(props.textureRoughnessUrl);
+                baseMaterial.roughnessMap.wrapS = THREE.RepeatWrapping;
+                baseMaterial.roughnessMap.wrapT = THREE.RepeatWrapping;
+                baseMaterial.roughnessMap.repeat.set(SCALING, SCALING);
+            }
+        } else if (baseMaterial instanceof THREE.MeshMatcapMaterial && props.matcapTextureUrl) {
+            const matcapTexture = textureLoader.current.load(props.matcapTextureUrl);
+            matcapTexture.colorSpace = THREE.SRGBColorSpace;
+            baseMaterial.flatShading = false;
+            baseMaterial.transparent = true;
+            baseMaterial.opacity = 0.9;
+            baseMaterial.matcap = matcapTexture;
+        } else if (baseMaterial instanceof THREE.MeshToonMaterial && props.toonGradientUrl) {
+            const toonGradientTexture = textureLoader.current.load(props.toonGradientUrl);
+            toonGradientTexture.colorSpace = THREE.SRGBColorSpace;
+            baseMaterial.gradientMap = toonGradientTexture;
         }
 
         model.current?.traverse((child) => {
             if (child instanceof THREE.Mesh) {
                 if (child.name.includes('glass')) {
                     child.material = new THREE.MeshPhysicalMaterial({
-                        color: 0xffffff,
-                        name: 'glassMaterial',
+                        color: 0x6440ff,
                         transparent: true,
-                        opacity: 0.5,
+                        opacity: 0.7,
                         transmission: 1,
                         roughness: 0,
+                        metalness: 0.1,
                         ior: 1.5,
-                        thickness: 0.1
+                        thickness: 0.2,
+                        iridescence: 1,
+                        iridescenceIOR: 1.3,
+                        iridescenceThicknessRange: [100, 400], // Rainbow effect
+                        clearcoat: 1,
+                        clearcoatRoughness: 0.1,
+                        reflectivity: 0.8,
+                        sheen: 0.8,
+                        sheenColor: new THREE.Color(0.8, 0.8, 1.0),
+                        sheenRoughness: 0.25,
                     });
+
+                    // child.material = new THREE.MeshPhysicalMaterial({
+                    //     color: 0xffffff,
+                    //     name: 'glassMaterial',
+                    //     transparent: true,
+                    //     opacity: 0.7,
+                    //     transmission: 1,
+                    //     roughness: 0,
+                    //     ior: 1.5,
+                    //     thickness: 0.1,
+                    //     iridescence: 1,
+                    //     iridescenceIOR: 1.3,
+                    //     iridescenceThicknessRange: [100, 400], // Rainbow effect
+                    // });
                 } else {
                     child.material = baseMaterial;
                 }
                 
             }
         });
+        
 
         updateRender();
     }, [props]);
@@ -236,7 +292,7 @@ const ThreeViewer: React.FC<ThreeViewerProps> = (props) => {
                 addDecal: () => {
                     const newDecalName = decals.current?.putDecal(new THREE.Vector2(814, 1370), {
                         text: 'NEW DECAL',
-                        fill: '#990061',
+                        fill: '#1f5628',
                         id: 'decal-wm4dgxf4wr',
                         rotate: 0
                     });
