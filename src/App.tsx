@@ -9,7 +9,7 @@ function App() {
         modelUrl="./models/glasses_fixed_uv_compress.glb"
         environmentUrl="./textures/hdri/hdri_1k.hdr"
         textureColorUrl='./textures/plastic/Plastic006_1K-JPG_Color.jpg'
-        matcapTextureUrl='./textures/matcap/14.png'
+        matcapTextureUrl='./textures/matcap/19.png'
         // toonGradientUrl='./textures/gradients/3.png'
         // textureColorUrl='./textures/color/glasses.svg'
         // textureColorUrl='./textures/color/polka-dots.svg'
